@@ -1,0 +1,20 @@
+# Secrets — never commit
+.env
+.env.*
+!.env.example
+
+# Wrangler cache (contains real account IDs)
+.wrangler/
+**/.wrangler/
+
+# Dependencies
+node_modules/
+
+# OS
+.DS_Store
+
+# Claude local tooling
+.claude/
+
+# Local working files
+tasks/
