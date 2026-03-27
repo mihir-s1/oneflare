@@ -13,7 +13,11 @@ services:
       - "8000:8000"
     volumes:
       - ../attack-scripts:/app/attack-scripts:ro
+      - attack_logs:/app/attack-scripts/logs
       - ./backend:/app
     environment:
       - PYTHONPATH=/app/attack-scripts
     working_dir: /app
+
+volumes:
+  attack_logs:
