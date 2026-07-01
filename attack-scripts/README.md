@@ -1,6 +1,6 @@
 # OneFlare Attack Scripts
 
-CLI reference for the AcmeCorp attack simulation suite.
+CLI reference for the NovaMind attack simulation suite.
 All scripts target the OneFlare lab Workers only — **authorized lab use only**.
 
 ---
@@ -101,7 +101,7 @@ python -m scenarios.04_cred_stuffing
 
 ### 05 — DNS Tunneling / C2 Beaconing (`scenarios/05_dns_tunnel.py`)
 
-Generates 30 DNS queries to algorithmically generated subdomains of `c2tunnel.acmecorp-lab.workers.dev`. Uses TXT record queries and base32-encoded subdomain labels to mimic dnscat2-style exfiltration.
+Generates 30 DNS queries to algorithmically generated subdomains of `c2tunnel.novamind-lab.workers.dev`. Uses TXT record queries and base32-encoded subdomain labels to mimic dnscat2-style exfiltration.
 
 ```bash
 python -m scenarios.05_dns_tunnel
@@ -131,10 +131,10 @@ Set in `.env.local` at the project root:
 
 | Variable | Default | Description |
 |---|---|---|
-| `CLOUDFLARE_DOMAIN` | `acmecorp-lab.workers.dev` | Your lab domain |
-| `PORTAL_USERNAME` | `admin@acmecorp.com` | Portal login username |
+| `CLOUDFLARE_DOMAIN` | `novamind-lab.workers.dev` | Your lab domain |
+| `PORTAL_USERNAME` | `admin@novamind.ai` | Portal login username |
 | `PORTAL_PASSWORD` | `AcmeAdmin2026!` | Portal login password |
-| `API_USERNAME` | `api_user@acmecorp.com` | API auth username |
+| `API_USERNAME` | `api_user@novamind.ai` | API auth username |
 | `API_PASSWORD` | `ApiUser2026!` | API auth password |
 
 ---

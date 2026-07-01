@@ -37,7 +37,7 @@ def print_intro():
         "[bold red]ONEFLARE[/bold red] [white]Attack Simulation Suite[/white]\n"
         "[dim]Cloudflare + SentinelOne Detection Lab[/dim]\n\n"
         "[yellow]WARNING:[/yellow] For authorized lab use only.\n"
-        "All traffic targets the AcmeCorp lab Workers only.",
+        "All traffic targets the NovaMind lab Workers only.",
         border_style="red",
         box=box.DOUBLE,
     ))
