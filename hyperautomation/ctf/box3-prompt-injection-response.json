@@ -1,0 +1,349 @@
+{
+  "name": "NovaMind CTF Box3 - Prompt Injection (Pyxis) Response",
+  "description": "Fires on the S1 Firewall-for-AI detection for Box 3 (prompt injection / jailbreak against Pyxis on POST /api/v1/chat, FirewallForAIInjectionScore=100). Enables a managed-challenge / Turnstile-style Cloudflare firewall rule scoped to the /api/v1/chat (llm) route, calls a NovaMind Cloudflare Worker to swap the active Pyxis model to a restricted fallback (pyxis-chat-v2-fast), locks the targeted Pyxis service account via the SentinelOne identity action, and notifies the SOC. run_automatically is false; an analyst approves from the Singularity Response console.",
+  "actions": [
+    {
+      "action": {
+        "type": "singularity_response_trigger",
+        "tag": "core_action",
+        "connection_id": null,
+        "connection_name": null,
+        "use_connection_name": false,
+        "integration_id": null,
+        "data": {
+          "name": "Singularity Response Trigger",
+          "action_type": "singularity_response_trigger",
+          "filter_groups": [
+            {
+              "condition": {
+                "operator": "and",
+                "conditions": [
+                  { "input_value": "name", "compared_value": "NovaMind-CTF-Box3-PromptInjection", "comparison_operator": "contains" },
+                  { "input_value": "severity", "compared_value": "[\"HIGH\",\"CRITICAL\"]", "comparison_operator": "in" }
+                ]
+              },
+              "is_disabled": false,
+              "run_automatically": false,
+              "event_type": "alert",
+              "event_subtypes": ["CREATE"]
+            }
+          ]
+        },
+        "state": "active",
+        "description": "Box 3 Firewall-for-AI prompt-injection detection on the Pyxis /api/v1/chat route.",
+        "client_data": { "position": { "x": 0, "y": 0 }, "dimensions": { "width": 256, "height": 100 }, "collapsed": false },
+        "snippet_workflow_id": null,
+        "snippet_version_id": null
+      },
+      "export_id": 12,
+      "connected_to": [{ "target": 11, "custom_handle": null }],
+      "parent_action": null
+    },
+    {
+      "action": {
+        "type": "variable",
+        "tag": "core_action",
+        "connection_id": null,
+        "connection_name": null,
+        "use_connection_name": false,
+        "integration_id": null,
+        "data": {
+          "name": "Attacker ClientIP",
+          "action_type": "variable",
+          "variables": [
+            { "name": "client_ip", "value": "{{Function.DEFAULT(singularity-response-trigger.data.indicators[0].value, \"no-ip\")}}", "should_use_as_output": false, "is_secret": false }
+          ],
+          "variables_scope": "local"
+        },
+        "state": "active",
+        "description": "Real origin ClientIP of the prompt-injection attempt.",
+        "client_data": { "position": { "x": 0, "y": 177 }, "dimensions": { "width": 256, "height": 76 }, "collapsed": false },
+        "snippet_workflow_id": null,
+        "snippet_version_id": null
+      },
+      "export_id": 11,
+      "connected_to": [{ "target": 10, "custom_handle": null }],
+      "parent_action": null
+    },
+    {
+      "action": {
+        "type": "variable",
+        "tag": "core_action",
+        "connection_id": null,
+        "connection_name": null,
+        "use_connection_name": false,
+        "integration_id": null,
+        "data": {
+          "name": "Targeted Service Account",
+          "action_type": "variable",
+          "variables": [
+            { "name": "service_account", "value": "{{Function.DEFAULT(singularity-response-trigger.data.asset.name, \"pyxis-chat-svc@novamind.ai\")}}", "should_use_as_output": false, "is_secret": false }
+          ],
+          "variables_scope": "local"
+        },
+        "state": "active",
+        "description": "Pyxis service account associated with the abused /api/v1/chat session (default to the known Pyxis svc account).",
+        "client_data": { "position": { "x": 0, "y": 354 }, "dimensions": { "width": 256, "height": 76 }, "collapsed": false },
+        "snippet_workflow_id": null,
+        "snippet_version_id": null
+      },
+      "export_id": 10,
+      "connected_to": [{ "target": 9, "custom_handle": null }],
+      "parent_action": null
+    },
+    {
+      "action": {
+        "type": "http_request",
+        "tag": "integration",
+        "connection_id": null,
+        "connection_name": "",
+        "use_connection_name": false,
+        "integration_id": null,
+        "data": {
+          "name": "Enable Under Attack on Chat Route",
+          "action_type": "http_request",
+          "public_action_id": "cloudflare-create-firewall-rules",
+          "method": "post",
+          "url": "{{Connection.protocol}}{{Connection.url}}/client/v4/zones/{{Connection.zone_id}}/firewall/rules",
+          "url_path": null,
+          "url_prefix": null,
+          "payload": "[{\n  \"action\": \"managed_challenge\",\n  \"description\": \"NovaMind CTF Box3 - Turnstile/Under-Attack on Pyxis /api/v1/chat\",\n  \"filter\": { \"expression\": \"(http.request.uri.path eq \\\"/api/v1/chat\\\")\" }\n}]",
+          "parameters": [],
+          "retry_on_status_code": null,
+          "retry_on_status_codes": [500],
+          "ssl_verification": true,
+          "timeout": 30,
+          "headers": { "Content-Type": "application/json", "accept": "application/json" },
+          "use_authentication_data": true,
+          "use_proxy": false,
+          "redirect_follow": true,
+          "continue_on_fail": false,
+          "body_type": null
+        },
+        "state": "active",
+        "description": "Apply a managed-challenge (Turnstile / Under-Attack equivalent) firewall rule scoped to the Pyxis chat route.",
+        "client_data": { "position": { "x": 0, "y": 531 }, "dimensions": { "width": 256, "height": 76 }, "collapsed": false },
+        "snippet_workflow_id": null,
+        "snippet_version_id": null
+      },
+      "export_id": 9,
+      "connected_to": [{ "target": 8, "custom_handle": null }],
+      "parent_action": null
+    },
+    {
+      "action": {
+        "type": "http_request",
+        "tag": "core_action",
+        "connection_id": null,
+        "connection_name": null,
+        "use_connection_name": false,
+        "integration_id": null,
+        "data": {
+          "name": "Swap Pyxis To Fallback Model",
+          "action_type": "http_request",
+          "public_action_id": null,
+          "method": "post",
+          "url": "https://novamind-api.novamind-lab.workers.dev/api/incident",
+          "url_path": null,
+          "url_prefix": null,
+          "payload": "{\n  \"active_model\": \"pyxis-chat-v2-fast\",\n  \"reason\": \"prompt-injection containment\",\n  \"severity\": \"high\",\n  \"affected_services\": [\"Pyxis Chat\"],\n  \"banner\": \"Pyxis is running in restricted fallback mode while we investigate a security event.\",\n  \"source_alert\": \"{{singularity-response-trigger.data.id}}\"\n}",
+          "parameters": [],
+          "retry_on_status_code": null,
+          "retry_on_status_codes": [500, 502, 503],
+          "ssl_verification": true,
+          "timeout": 30,
+          "headers": { "Content-Type": "application/json", "X-Incident-Key": "<set-INCIDENT_KEY-after-import>" },
+          "use_authentication_data": false,
+          "use_proxy": false,
+          "redirect_follow": true,
+          "continue_on_fail": true,
+          "body_type": null
+        },
+        "state": "active",
+        "description": "Call the NovaMind Worker to swap Pyxis to the restricted fallback model and raise the /status incident banner. Key-gated by INCIDENT_KEY (set the X-Incident-Key header value after import; do not commit the real key).",
+        "client_data": { "position": { "x": 0, "y": 708 }, "dimensions": { "width": 256, "height": 76 }, "collapsed": false },
+        "snippet_workflow_id": null,
+        "snippet_version_id": null
+      },
+      "export_id": 8,
+      "connected_to": [{ "target": 7, "custom_handle": null }],
+      "parent_action": null
+    },
+    {
+      "action": {
+        "type": "condition",
+        "tag": "core_action",
+        "connection_id": null,
+        "connection_name": null,
+        "use_connection_name": false,
+        "integration_id": null,
+        "data": {
+          "name": "Service Account Known",
+          "action_type": "condition",
+          "condition_type": "multi",
+          "condition": null,
+          "conditions": [
+            { "input_value": "{{local_var.service_account}}", "compared_value": "", "comparison_operator": "not_equals" }
+          ],
+          "conditions_relationship": "and"
+        },
+        "state": "active",
+        "description": "Only attempt the identity lock when a target service account is present.",
+        "client_data": { "position": { "x": 0, "y": 885 }, "dimensions": { "width": 256, "height": 76 }, "collapsed": false },
+        "snippet_workflow_id": null,
+        "snippet_version_id": null
+      },
+      "export_id": 7,
+      "connected_to": [{ "target": 6, "custom_handle": "true" }],
+      "parent_action": null
+    },
+    {
+      "action": {
+        "type": "http_request",
+        "tag": "integration",
+        "connection_id": null,
+        "connection_name": "",
+        "use_connection_name": false,
+        "integration_id": null,
+        "data": {
+          "name": "Lock Pyxis Service Account",
+          "action_type": "http_request",
+          "public_action_id": "entra-disable-user",
+          "method": "patch",
+          "url": "{{Connection.protocol}}{{Connection.url}}/v1.0/users/{{local_var.service_account}}",
+          "url_path": null,
+          "url_prefix": null,
+          "payload": "{\n  \"accountEnabled\": false\n}",
+          "parameters": [],
+          "retry_on_status_code": null,
+          "retry_on_status_codes": [500],
+          "ssl_verification": true,
+          "timeout": 30,
+          "headers": { "Content-Type": "application/json" },
+          "use_authentication_data": true,
+          "use_proxy": false,
+          "redirect_follow": true,
+          "continue_on_fail": false,
+          "body_type": null
+        },
+        "state": "active",
+        "description": "Disable the targeted Pyxis service account in the identity provider (Entra/M365). Swap this action's connection for your IdP integration if not Entra.",
+        "client_data": { "position": { "x": 0, "y": 1062 }, "dimensions": { "width": 256, "height": 76 }, "collapsed": false },
+        "snippet_workflow_id": null,
+        "snippet_version_id": null
+      },
+      "export_id": 6,
+      "connected_to": [{ "target": 5, "custom_handle": null }],
+      "parent_action": null
+    },
+    {
+      "action": {
+        "type": "http_request",
+        "tag": "integration",
+        "connection_id": null,
+        "connection_name": "",
+        "use_connection_name": false,
+        "integration_id": null,
+        "data": {
+          "name": "Add S1 IOC",
+          "action_type": "http_request",
+          "public_action_id": "sentinelone-create-ioc",
+          "method": "post",
+          "url": "{{Connection.protocol}}{{Connection.url}}/web/api/v2.1/threat-intelligence/iocs",
+          "url_path": null,
+          "url_prefix": null,
+          "payload": "{\n  \"data\": [{\n    \"type\": \"IPV4\",\n    \"value\": \"{{local_var.client_ip}}\",\n    \"method\": \"EQUALS\",\n    \"source\": \"NovaMind CTF Hyperautomation\",\n    \"name\": \"NovaMind CTF Pyxis prompt-injection origin\",\n    \"description\": \"Auto-added from CTF Box3 prompt-injection alert {{singularity-response-trigger.data.id}}\",\n    \"category\": \"ml-attack\",\n    \"externalId\": \"NovaMind-CTF\",\n    \"originalRiskScore\": \"90\",\n    \"creationTime\": \"{{Function.DATETIME_NOW()}}\",\n    \"validUntil\": \"{{Function.DELTA_NOW(-168)}}\"\n  }],\n  \"filter\": { \"accountIds\": [\"{{singularity-response-trigger.data.scopeId}}\"] }\n}",
+          "parameters": [],
+          "retry_on_status_code": null,
+          "retry_on_status_codes": [500],
+          "ssl_verification": true,
+          "timeout": 30,
+          "headers": { "Content-Type": "application/json", "accept": "application/json" },
+          "use_authentication_data": true,
+          "use_proxy": false,
+          "redirect_follow": true,
+          "continue_on_fail": true,
+          "body_type": null
+        },
+        "state": "active",
+        "description": "Create an S1 IOC for the prompt-injection source IP.",
+        "client_data": { "position": { "x": 0, "y": 1239 }, "dimensions": { "width": 256, "height": 76 }, "collapsed": false },
+        "snippet_workflow_id": null,
+        "snippet_version_id": null
+      },
+      "export_id": 5,
+      "connected_to": [{ "target": 4, "custom_handle": null }],
+      "parent_action": null
+    },
+    {
+      "action": {
+        "type": "http_request",
+        "tag": "integration",
+        "connection_id": null,
+        "connection_name": "",
+        "use_connection_name": false,
+        "integration_id": null,
+        "data": {
+          "name": "Notify Slack",
+          "action_type": "http_request",
+          "public_action_id": "slack-post-message",
+          "method": "post",
+          "url": "https://slack.com/api/chat.postMessage",
+          "url_path": null,
+          "url_prefix": null,
+          "payload": "{\n  \"channel\": \"#novamind-soc\",\n  \"text\": \"NovaMind CTF Box3 (Pyxis prompt injection) contained: Turnstile/Under-Attack on /api/v1/chat, Pyxis swapped to pyxis-chat-v2-fast fallback, service account {{local_var.service_account}} locked, S1 IOC added for {{local_var.client_ip}}. Alert {{singularity-response-trigger.data.id}}.\"\n}",
+          "parameters": [],
+          "retry_on_status_code": null,
+          "retry_on_status_codes": [500],
+          "ssl_verification": true,
+          "timeout": 30,
+          "headers": { "Content-Type": "application/json" },
+          "use_authentication_data": true,
+          "use_proxy": false,
+          "redirect_follow": true,
+          "continue_on_fail": true,
+          "body_type": null
+        },
+        "state": "active",
+        "description": "Post Box 3 containment summary to the SOC Slack channel.",
+        "client_data": { "position": { "x": 0, "y": 1416 }, "dimensions": { "width": 256, "height": 76 }, "collapsed": false },
+        "snippet_workflow_id": null,
+        "snippet_version_id": null
+      },
+      "export_id": 4,
+      "connected_to": [{ "target": 3, "custom_handle": null }],
+      "parent_action": null
+    },
+    {
+      "action": {
+        "type": "send_email",
+        "tag": "core_action",
+        "connection_id": null,
+        "connection_name": null,
+        "use_connection_name": false,
+        "integration_id": null,
+        "data": {
+          "name": "Send Email",
+          "action_type": "send_email",
+          "subject": "[NovaMind CTF] Box3 Pyxis prompt-injection contained",
+          "to": ["soc@novamind.ai"],
+          "cc": [],
+          "bcc": [],
+          "reply_to": [],
+          "mime_type": "text/html",
+          "body": "<!DOCTYPE html><html><body><h3>NovaMind CTF Box 3 - Pyxis Prompt Injection</h3><p>Alert {{singularity-response-trigger.data.id}} ({{singularity-response-trigger.data.name}})</p><ul><li>Turnstile / Under-Attack applied to /api/v1/chat</li><li>Pyxis active model swapped to restricted fallback pyxis-chat-v2-fast</li><li>Service account locked: {{local_var.service_account}}</li><li>S1 IOC created for {{local_var.client_ip}}</li></ul></body></html>",
+          "attachments": [],
+          "continue_on_fail": true
+        },
+        "state": "active",
+        "description": "Email the SOC a Box 3 containment receipt.",
+        "client_data": { "position": { "x": 0, "y": 1593 }, "dimensions": { "width": 256, "height": 76 }, "collapsed": false },
+        "snippet_workflow_id": null,
+        "snippet_version_id": null
+      },
+      "export_id": 3,
+      "connected_to": [],
+      "parent_action": null
+    }
+  ]
+}

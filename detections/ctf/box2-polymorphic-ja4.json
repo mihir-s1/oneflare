@@ -1,0 +1,57 @@
+{
+  "box": "Box 2 — Bot Management (polymorphic bot, constant JA4)",
+  "scenario": "The agent rotates User-Agent on every request to evade bot detection, but its TLS fingerprint (JA4) is constant because the Python requests library cannot disguise its TLS handshake. Detect the invariant: one JA4 fingerprint behind many distinct User-Agents. THIS IS THE SIGNATURE DETECTION of the CTF.",
+  "attack_source": "attack-scripts/campaigns/ctf.py :: fire_phase_2_* (ROTATING_USER_AGENTS, CTF_JA4_CONSTANT, BOT_PROBE_PATHS)",
+  "field_contract": "detections/shared/field-contract.md",
+  "ctf_flag": "t13d1812h1_85036bcba153_b26ce05bbdd6",
+  "design_note": "JA4 maps to ja4_fingerprint_list[0].value. Bracketed array fields CANNOT be used as a filter predicate (HTTP 400) but CAN be used in group-by and columns. So Box 2 is a SCHEDULED rule that GROUPS BY the JA4 column and counts distinct User-Agents — it does not (and cannot) predicate on the literal flag value. This is also the more robust detection: it catches ANY constant-JA4/rotating-UA polymorphic bot, not just this one hardcoded fingerprint.",
+  "rules": [
+    {
+      "name": "NovaMind-CTF-Box2-PolymorphicJA4",
+      "rule_type": "scheduled (PowerQuery)",
+      "severity": "High",
+      "mitre": ["T1036.005 Masquerading: Match Legitimate Name or Location", "T1595.002 Active Scanning", "T1071.001 Application Layer Protocol: Web Protocols"],
+      "atlas": ["AML.T0035 Evade ML Model (UA polymorphism to evade bot heuristics)"],
+      "data_source": "Cloudflare — HTTP Requests (class_uid=4002); JA4 only present in HTTP Requests dataset, not Firewall Events.",
+      "primary_signal": "One ja4_fingerprint_list[0].value associated with an abnormally high count of DISTINCT http_request.user_agent values — the polymorphic-bot invariant. Strong tier: distinct UAs >= 6.",
+      "ocsf_fields": {
+        "ja4_fingerprint_list[0].value": "mapped (JA4) — group key + entity; the CTF flag rides here",
+        "http_request.user_agent": "mapped — distinct-counted (the rotation)",
+        "src_endpoint.ip": "mapped — carried, usually constant (single origin)",
+        "http_request.url.path": "mapped — distinct-counted (probe spread)",
+        "unmapped.BotScore": "TO-VERIFY — optional corroboration (expected low, ~29)",
+        "unmapped.BotDetectionTags": "TO-VERIFY — expected ['scraper','python']"
+      },
+      "hunt_query": {
+        "powerquery": "dataSource.name='Cloudflare' dataSource.cloudflare_dataset='HTTP Requests' ja4_fingerprint_list[0].value=* http_request.user_agent=* | group distinct_uas=estimate_distinct(http_request.user_agent), hits=count(), distinct_paths=estimate_distinct(http_request.url.path), src_ips=estimate_distinct(src_endpoint.ip), first_seen=oldest(timestamp), last_seen=newest(timestamp), src_ip=any(src_endpoint.ip) by ja4=ja4_fingerprint_list[0].value | filter distinct_uas >= 6 | columns ja4, distinct_uas, distinct_paths, hits, src_ips, src_ip, first_seen, last_seen | sort -distinct_uas | limit 100",
+        "note": "distinct_uas >= 6 is the polymorphism threshold (ROTATING_USER_AGENTS has ~19 entries; a real browser fingerprint typically maps to 1-2 UA families, a real SDK to 1). The CTF flag JA4 will be the top row. Validate by walking the threshold down until the flag JA4 appears, then set just above benign browser variance.",
+        "row_counts": "TO-RUN on live tenant.",
+        "purple_ai_equivalent": "Find all requests sharing JA4 t13d1812h1_85036bcba153_b26ce05bbdd6 and identify the attack pattern across endpoints."
+      },
+      "api_body": {
+        "data": {
+          "name": "NovaMind-CTF-Box2-PolymorphicJA4",
+          "description": "Polymorphic bot: one JA4 TLS fingerprint behind >=6 distinct User-Agents in the window (UA rotation, constant TLS handshake = Python requests). CTF flag JA4 t13d1812h1_85036bcba153_b26ce05bbdd6. MITRE T1036.005 / T1595.002; ATLAS AML.T0035. Source: Cloudflare HTTP Requests (class_uid=4002).",
+          "queryType": "scheduled",
+          "queryLang": "2.0",
+          "severity": "High",
+          "status": "Disabled",
+          "expirationMode": "Permanent",
+          "treatAsThreat": "UNDEFINED",
+          "networkQuarantine": false,
+          "entityMappings": [{"columnName": "ja4"}, {"columnName": "src_ip"}],
+          "scheduledParams": {
+            "query": "dataSource.name='Cloudflare' dataSource.cloudflare_dataset='HTTP Requests' ja4_fingerprint_list[0].value=* http_request.user_agent=* | group distinct_uas=estimate_distinct(http_request.user_agent), hits=count(), distinct_paths=estimate_distinct(http_request.url.path), src_ips=estimate_distinct(src_endpoint.ip), first_seen=oldest(timestamp), last_seen=newest(timestamp), src_ip=any(src_endpoint.ip) by ja4=ja4_fingerprint_list[0].value | filter distinct_uas >= 6 | columns ja4, distinct_uas, distinct_paths, hits, src_ips, src_ip, first_seen, last_seen | sort -distinct_uas | limit 100",
+            "runIntervalMinutes": 15,
+            "lookbackWindowMinutes": 15,
+            "threshold": {"value": 0, "operator": "Greater"}
+          }
+        },
+        "filter": {"accountIds": ["<accountId>"]}
+      },
+      "asset_binding": "Scheduled rule: entityMappings on ja4 (the fingerprint as the primary entity — the actor identity that survives UA rotation) and src_ip. The JA4 fingerprint is the most stable actor key here; the HA playbook can block by JA4 via a Cloudflare WAF custom rule AND by src IP. Device shows 'Unknown Device' until asset enrichment.",
+      "deploy": "POST -> enable -> poll until Active -> wait one 15-min interval. Scheduled-rule constraints (treatAsThreat=UNDEFINED, networkQuarantine=false). List with isLegacy=false. Do NOT try to predicate on the literal JA4 in a single-event/events rule — ja4_fingerprint_list[0].value is a bracketed array field and a filter predicate on it returns HTTP 400; the group-by/scheduled form is required.",
+      "tuning_and_variants": "If unmapped.BotScore / unmapped.BotDetectionTags are confirmed queryable in live schema discovery, add a corroboration tier: append '| filter number(bot_score) < 30' after projecting bot_score=any(unmapped.BotScore), or pre-filter http_request.user_agent matches '(?i)(python|langchain|autogen|crewai|agentexecutor|reactagent)' for the agentic-framework-UA subset. These are additive precision boosters, not required for the core signature."
+    }
+  ]
+}
