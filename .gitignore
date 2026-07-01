@@ -20,3 +20,6 @@ lab-ui/frontend/dist/
 
 # Everything else — agents, rules, skills (.claude/), tasks/, and the
 # vendored S1 reference (reference/) — IS tracked and pushed to git.
+
+# Local, environment-specific compose override (e.g. offline/host-built dist)
+lab-ui/docker-compose.override.yml
