@@ -1,0 +1,108 @@
+name: cloudflare-ocsf-parser
+version: "1.0.0"
+description: >
+  Cloudflare → OCSF 1.6.0 parser for SentinelOne.
+  Maps 15 Cloudflare Logpush datasets to their correct OCSF classes and categories.
+  Compatible with SentinelOne Deep Visibility and AI SIEM ingest pipelines.
+
+vendor: Cloudflare
+ocsf_version: "1.6.0"
+s1_parser_version: "1"
+
+datasets:
+  - name: "Audit Logs V2"
+    predicate: "AuditLogID && ActionTimestamp"
+    ocsf_class: "Entity Management (3004)"
+    ocsf_category: "Identity & Access Management (3)"
+
+  - name: "DNS Logs (Logpush)"
+    predicate: "QueryName && Timestamp"
+    ocsf_class: "DNS Activity (4003)"
+    ocsf_category: "Network Activity (4)"
+
+  - name: "Audit Logs (v1)"
+    predicate: "ID && When"
+    ocsf_class: "Entity Management (3004)"
+    ocsf_category: "Identity & Access Management (3)"
+
+  - name: "HTTP Requests"
+    predicate: "ClientRequestMethod && EdgeStartTimestamp"
+    ocsf_class: "HTTP Activity (4002)"
+    ocsf_category: "Network Activity (4)"
+
+  - name: "Access Requests"
+    predicate: "UserUID && CreatedAt"
+    ocsf_class: "User Access Management (3005)"
+    ocsf_category: "Identity & Access Management (3)"
+
+  - name: "Device Posture Results"
+    predicate: "PostureCheckName && Timestamp"
+    ocsf_class: "Application Security Posture Finding (2007)"
+    ocsf_category: "Findings (2)"
+
+  - name: "Firewall Events"
+    predicate: "RuleID && Kind"
+    ocsf_class: "HTTP Activity (4002)"
+    ocsf_category: "Network Activity (4)"
+
+  - name: "Gateway Network"
+    predicate: "SNI && Datetime"
+    ocsf_class: "Network Activity (4001)"
+    ocsf_category: "Network Activity (4)"
+
+  - name: "Gateway DNS"
+    predicate: "QueryName && Datetime"
+    ocsf_class: "DNS Activity (4003)"
+    ocsf_category: "Network Activity (4)"
+
+  - name: "Gateway HTTP"
+    predicate: "HTTPHost && Datetime"
+    ocsf_class: "HTTP Activity (4002)"
+    ocsf_category: "Network Activity (4)"
+
+  - name: "Network Analytics Logs"
+    predicate: "AttackVector && Datetime"
+    ocsf_class: "Network Activity (4001)"
+    ocsf_category: "Network Activity (4)"
+
+  - name: "Zero Trust Network Session Logs"
+    predicate: "EgressIP && SessionStartTime"
+    ocsf_class: "Network Activity (4001)"
+    ocsf_category: "Network Activity (4)"
+
+  - name: "Email Security Alerts"
+    predicate: "From && Timestamp"
+    ocsf_class: "Email Activity (4009)"
+    ocsf_category: "Network Activity (4)"
+
+  - name: "DLP Forensic Copies"
+    predicate: "ForensicCopyID && Datetime"
+    ocsf_class: "Data Security Finding (2006)"
+    ocsf_category: "Findings (2)"
+
+  - name: "Spectrum Events"
+    predicate: "Event && Timestamp"
+    ocsf_class: "Network Activity (4001)"
+    ocsf_category: "Network Activity (4)"
+
+  - name: "SSH Logs"
+    predicate: "PTY && Datetime"
+    ocsf_class: "SSH Activity (4007)"
+    ocsf_category: "Network Activity (4)"
+
+  - name: "CASB Findings"
+    predicate: "AssetLink && DetectedTimestamp"
+    ocsf_class: "Data Security Finding (2006)"
+    ocsf_category: "Findings (2)"
+
+fixes_vs_upstream:
+  - "SSH: metadata.profiles[a] → metadata.profiles[0] (invalid index literal)"
+  - "Gateway HTTP: SourcePort was mapped to dst_endpoint.port — corrected to src_endpoint.port"
+  - "Gateway DNS: QueryName present in predicate but unmapped — added rename to query.hostname"
+  - "Gateway DNS: Duplicate DeviceName and device.type_id mappings removed"
+  - "Network Analytics: rename-from-already-mapped dst_endpoint.ip replaced with copy+rename from unmapped source"
+  - "Spectrum: observables[1].name was 'src_endpoint.ip' — corrected to 'dst_endpoint.ip'"
+
+source:
+  reference: "SentinelOne Marketplace — marketplace-cloudflare-latest"
+  ocsf_schema: "https://github.com/Sentinel-One/ocsf-schema"
