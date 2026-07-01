@@ -87,6 +87,7 @@ export default function ScenarioDetail() {
   const apiUrl = localStorage.getItem('oneflare_api_url') || ''
   const attackDelay = localStorage.getItem('oneflare_attack_delay') || '0.5'
   const attackJitter = localStorage.getItem('oneflare_attack_jitter') || '0.3'
+  const gatewayDohUrl = localStorage.getItem('oneflare_cf_gateway_doh_url') || ''
 
   const isConfigured = !!domain
 
@@ -131,6 +132,7 @@ export default function ScenarioDetail() {
         api_url: apiUrl,
         delay: parseFloat(attackDelay),
         jitter: parseFloat(attackJitter),
+        gateway_doh_url: gatewayDohUrl,
       }
       ws.send(JSON.stringify(config))
     }
@@ -385,9 +387,9 @@ export default function ScenarioDetail() {
               <div className="space-y-2">
                 {[
                   { label: 'CF Domain', value: domain, required: true },
-                  { label: 'Shop URL', value: shopUrl, fallback: `https://shop.${domain || 'acmecorp.dev'}` },
-                  { label: 'Portal URL', value: portalUrl, fallback: `https://portal.${domain || 'acmecorp.dev'}` },
-                  { label: 'API URL', value: apiUrl, fallback: `https://api.${domain || 'acmecorp.dev'}` },
+                  { label: 'Shop URL', value: shopUrl, fallback: `https://shop.${domain || 'novamind.ai'}` },
+                  { label: 'Portal URL', value: portalUrl, fallback: `https://portal.${domain || 'novamind.ai'}` },
+                  { label: 'API URL', value: apiUrl, fallback: `https://api.${domain || 'novamind.ai'}` },
                 ].map(({ label, value, required, fallback }) => (
                   <div key={label} className="flex items-center gap-3">
                     <span className="text-xs text-slate-500 w-24 shrink-0">{label}</span>

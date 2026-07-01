@@ -5,18 +5,19 @@ import {
 } from 'lucide-react'
 
 const STORAGE_KEYS = {
-  cf_api_token:     'oneflare_cf_api_token',
-  cf_account_id:    'oneflare_cf_account_id',
-  cf_zone_id:       'oneflare_cf_zone_id',
-  cf_domain:        'oneflare_cf_domain',
-  shop_url:         'oneflare_shop_url',
-  portal_url:       'oneflare_portal_url',
-  api_url:          'oneflare_api_url',
-  s1_api_url:       'oneflare_s1_api_url',
-  s1_api_token:     'oneflare_s1_api_token',
-  s1_mcp_url:       'oneflare_s1_mcp_url',
-  attack_delay:     'oneflare_attack_delay',
-  attack_jitter:    'oneflare_attack_jitter',
+  cf_api_token:        'oneflare_cf_api_token',
+  cf_account_id:       'oneflare_cf_account_id',
+  cf_zone_id:          'oneflare_cf_zone_id',
+  cf_domain:           'oneflare_cf_domain',
+  cf_gateway_doh_url:  'oneflare_cf_gateway_doh_url',
+  shop_url:            'oneflare_shop_url',
+  portal_url:          'oneflare_portal_url',
+  api_url:             'oneflare_api_url',
+  s1_api_url:          'oneflare_s1_api_url',
+  s1_api_token:        'oneflare_s1_api_token',
+  s1_mcp_url:          'oneflare_s1_mcp_url',
+  attack_delay:        'oneflare_attack_delay',
+  attack_jitter:       'oneflare_attack_jitter',
 }
 
 function loadSettings() {
@@ -233,8 +234,23 @@ export default function Settings() {
             fieldKey="cf_domain"
             value={settings.cf_domain}
             onChange={handleChange}
-            placeholder="acmecorp-lab.workers.dev"
-            note="Used to construct default target URLs. Example: acmecorp-lab.workers.dev"
+            placeholder="novamind-lab.workers.dev"
+            note="Used to construct default target URLs. Example: novamind-lab.workers.dev"
+          />
+
+          <Field
+            label="Gateway DoH URL"
+            fieldKey="cf_gateway_doh_url"
+            value={settings.cf_gateway_doh_url}
+            onChange={handleChange}
+            placeholder="https://<team>.cloudflareaccess.com/dns-query"
+            note={
+              <>
+                Required for the DNS tunnel scenario to log in Gateway.{' '}
+                Go to <strong className="text-slate-300">one.dash.cloudflare.com → Zero Trust → Settings → General</strong> and find your <strong className="text-slate-300">Team domain</strong> (e.g. <span className="font-mono">novamind.cloudflareaccess.com</span>).
+                {' '}Your DoH URL is <span className="font-mono">https://&lt;team-domain&gt;/dns-query</span> — no location setup needed.
+              </>
+            }
           />
 
           {/* Test connection */}
@@ -279,21 +295,21 @@ export default function Settings() {
             fieldKey="shop_url"
             value={settings.shop_url}
             onChange={handleChange}
-            placeholder={`https://shop.${settings.cf_domain || 'acmecorp-lab.workers.dev'}`}
+            placeholder={`https://shop.${settings.cf_domain || 'novamind-lab.workers.dev'}`}
           />
           <Field
             label="Portal URL"
             fieldKey="portal_url"
             value={settings.portal_url}
             onChange={handleChange}
-            placeholder={`https://portal.${settings.cf_domain || 'acmecorp-lab.workers.dev'}`}
+            placeholder={`https://portal.${settings.cf_domain || 'novamind-lab.workers.dev'}`}
           />
           <Field
             label="API URL"
             fieldKey="api_url"
             value={settings.api_url}
             onChange={handleChange}
-            placeholder={`https://api.${settings.cf_domain || 'acmecorp-lab.workers.dev'}`}
+            placeholder={`https://api.${settings.cf_domain || 'novamind-lab.workers.dev'}`}
           />
         </div>
       </Section>

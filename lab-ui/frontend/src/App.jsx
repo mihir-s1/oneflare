@@ -6,6 +6,8 @@ import History from './pages/History.jsx'
 import Detections from './pages/Detections.jsx'
 import Architecture from './pages/Architecture.jsx'
 import Settings from './pages/Settings.jsx'
+import Parsers from './pages/Parsers.jsx'
+import ThreatOps from './pages/ThreatOps.jsx'
 
 export default function App() {
   return (
@@ -16,7 +18,9 @@ export default function App() {
         <Route path="/history" element={<History />} />
         <Route path="/detections" element={<Detections />} />
         <Route path="/architecture" element={<Architecture />} />
+        <Route path="/parsers" element={<Parsers />} />
         <Route path="/settings" element={<Settings />} />
+        <Route path="/threatops" element={<ThreatOps />} />
       </Routes>
     </Layout>
   )
