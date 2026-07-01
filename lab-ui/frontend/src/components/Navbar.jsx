@@ -30,7 +30,7 @@ function NavItem({ to, label, icon: Icon, location }) {
     <NavLink
       key={to}
       to={to}
-      className={`relative flex items-center gap-1.5 px-3 py-1.5 rounded-lg text-sm font-medium transition-all duration-200 ${
+      className={`relative flex items-center gap-1.5 px-3 py-1.5 rounded-lg text-sm font-medium transition-all duration-200 shrink-0 ${
         isActive
           ? 'text-orange-400 bg-orange-500/10'
           : 'text-slate-400 hover:text-slate-200 hover:bg-white/5'
@@ -66,12 +66,12 @@ export default function Navbar() {
           </span>
         </NavLink>
 
-        {/* Nav clusters */}
-        <div className="flex items-center gap-0.5 flex-1 min-w-0">
+        {/* Nav clusters — scroll (never overlap) if the row is too narrow */}
+        <div className="flex items-center gap-0.5 flex-1 min-w-0 overflow-x-auto no-scrollbar">
 
           {/* Cluster: Lab Scenarios */}
-          <div className="flex items-center gap-0.5">
-            <span className="hidden lg:inline text-[10px] font-mono font-semibold text-slate-600 uppercase tracking-widest px-2 whitespace-nowrap select-none">
+          <div className="flex items-center gap-0.5 shrink-0">
+            <span className="hidden xl:inline text-[10px] font-mono font-semibold text-slate-600 uppercase tracking-widest px-2 whitespace-nowrap select-none shrink-0">
               Lab Scenarios
             </span>
             {LAB_ITEMS.map((item) => (
@@ -85,8 +85,8 @@ export default function Navbar() {
           </div>
 
           {/* Cluster: ThreatOps */}
-          <div className="flex items-center gap-0.5">
-            <span className="hidden lg:inline text-[10px] font-mono font-semibold text-purple-500/70 uppercase tracking-widest px-2 whitespace-nowrap select-none">
+          <div className="flex items-center gap-0.5 shrink-0">
+            <span className="hidden xl:inline text-[10px] font-mono font-semibold text-purple-500/70 uppercase tracking-widest px-2 whitespace-nowrap select-none shrink-0">
               ThreatOps
             </span>
             {THREATOPS_ITEMS.map((item) => (

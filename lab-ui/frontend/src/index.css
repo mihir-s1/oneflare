@@ -61,6 +61,15 @@ body {
   border-radius: 2px;
 }
 
+/* Hide scrollbar but keep scrollability (used by the nav cluster row) */
+.no-scrollbar {
+  -ms-overflow-style: none;
+  scrollbar-width: none;
+}
+.no-scrollbar::-webkit-scrollbar {
+  display: none;
+}
+
 /* Selection color */
 ::selection {
   background: rgba(168, 85, 247, 0.3);
