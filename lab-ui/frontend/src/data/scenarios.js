@@ -222,7 +222,75 @@ THRESHOLD: 10 queries to same root domain
       { step: 4, action: "Create IP Access Rule", detail: "Block source device IP at zone level" },
       { step: 5, action: "Create PCAP Request", detail: "Capture 120s for forensic DNS analysis" },
       { step: 6, action: "Update Log Retention", detail: "Preserve Gateway DNS logs for investigation" }
-    ]
+    ],
+    siem: {
+      ruleName: "CF-Gateway-DNSTunnel",
+      ruleType: "Scheduled detection",
+      queryLang: "PowerQuery 2.0 · SentinelOne SDL",
+      dataSource: "Cloudflare Gateway DNS → OCSF DNS Activity (class_uid 4003)",
+      severity: "High",
+      validated: true,
+      validationNote: "Live-validated against real Gateway DNS data — 0 false positives after tuning. The attack source scored uniq=33 / long=10 / txt=3 (fires on multiple branches); benign domains (time.cloudflare.com, google, github, saas.atlassian.com) all cleared.",
+      importance: "DNS is the internet's most overlooked exfiltration and command-and-control channel. It is almost always allowed outbound, rarely deep-inspected, and keeps working when HTTP/S egress is blocked — which is exactly why attackers tunnel data and C2 traffic through it. Because the traffic looks like ordinary name resolution, only behavioral analytics (not signatures) reliably catch it.",
+      whyDetect: [
+        "Covert channel that bypasses web proxies and TLS inspection — DNS egress is open on nearly every network.",
+        "Data-in-DNS exfiltration: stolen data is base32/hex-encoded into query subdomains and reassembled by the attacker's authoritative server.",
+        "C2 beaconing: implants receive tasking via TXT/CNAME answers at regular check-in intervals.",
+        "DGA / fast-flux rotates through thousands of algorithmic domains to defeat static blocklists — you must detect the pattern, not the domain.",
+      ],
+      query: `class_uid=4003 dataSource.cloudflare_dataset='Gateway DNS' unmapped.QueryName=*
+| let fqdn        = lower(unmapped.QueryName)
+| let label       = replace(fqdn, '\\\\..*', '')
+| let zone        = replace(fqdn, '^.*\\\\.([^.]+\\\\.[^.]+\\\\.[^.]+)$', '$1')
+| let label_len   = len(label)
+| let digit_cnt   = len(replace(label, '[^0-9]', ''))
+| let digit_ratio = label_len > 0 ? digit_cnt / label_len : 0
+| let is_txt      = query.type in:anycase ('txt')
+| let src_ip      = src_endpoint.ip
+| let host        = device.name
+| group
+    total_queries = count(),
+    uniq_labels   = estimate_distinct(label),
+    max_label_len = max(label_len),
+    long_labels   = count(label_len >= 40),
+    txt_long      = count(is_txt AND label_len >= 20),
+    hi_entropy    = count(label_len >= 12 AND digit_ratio >= 0.15),
+    device_uid    = any(device.uid),
+    evidence      = max_by(unmapped.QueryName, label_len),
+    first_seen    = oldest(timestamp),
+    last_seen     = newest(timestamp)
+  by src_ip, host, zone
+| filter uniq_labels >= 15 OR (long_labels >= 5 AND uniq_labels >= 5) OR txt_long >= 3 OR (hi_entropy >= 10 AND uniq_labels >= 5)
+| sort -uniq_labels
+| limit 100`,
+      queryExplained: [
+        { code: "class_uid=4003 · dataSource.cloudflare_dataset='Gateway DNS'", note: "Scope to Cloudflare Gateway DNS events, normalized to the OCSF DNS Activity class." },
+        { code: "unmapped.QueryName", note: "The queried FQDN. Gotcha: OCSF query.hostname is empty for this source — read unmapped.QueryName or the query returns zero rows." },
+        { code: "label = leftmost subdomain", note: "Isolate the leftmost label — where tunneled data and DGA randomness live." },
+        { code: "zone = rightmost 3 labels", note: "Registered-zone proxy so the beacon. / update. / c2tunnel. prefixes roll up into one group (no PSL available in PQ)." },
+        { code: "digit_ratio = digits / length", note: "Entropy proxy — SDL PQ has no Shannon-entropy function; digit-mixed labels signal machine generation." },
+        { code: "group … by src_ip, host, zone", note: "Aggregate per source + zone. Tunneling is a statistical pattern across many queries, never a single event." },
+        { code: "filter (clustered signals)", note: "Every branch requires clustering — many long AND unique labels, or high volume — never a single weak signal." },
+      ],
+      signals: [
+        { signal: "uniq_labels ≥ 15", catches: "DGA / C2 beaconing", why: "Malware mints a fresh random subdomain per check-in; a human revisits the same names." },
+        { signal: "long_labels ≥ 5 AND uniq_labels ≥ 5", catches: "dnscat2 / iodine tunneling", why: "Data chunked across many long, unique labels — not one legitimate long CDN host." },
+        { signal: "txt_long ≥ 3", catches: "Data-in-DNS exfiltration", why: "Base32 payloads in TXT query names; DKIM/ESNI put data in the response, not the query name." },
+        { signal: "hi_entropy ≥ 10 AND uniq_labels ≥ 5", catches: "High-entropy DGA labels", why: "Digit-mixed automated labels, gated by variety so a single repeated hash can't trip it." },
+      ],
+      mitre: [
+        { id: "T1071.004", tactic: "Command & Control", name: "Application Layer Protocol: DNS", url: "https://attack.mitre.org/techniques/T1071/004/" },
+        { id: "T1048", tactic: "Exfiltration", name: "Exfiltration Over Alternative Protocol", url: "https://attack.mitre.org/techniques/T1048/" },
+        { id: "T1568.002", tactic: "Command & Control", name: "Dynamic Resolution: Domain Generation Algorithms", url: "https://attack.mitre.org/techniques/T1568/002/" },
+      ],
+      falsePositive: {
+        finding: "Live validation surfaced one false positive: saas.atlassian.com (a 61-character subdomain label) tripped the original standalone \"max_label_len ≥ 50\" rule.",
+        rootCause: "A DNS label is capped at 63 characters by spec — so a single long label maxes out around 63 for everyone and cannot distinguish a legitimate SaaS/CDN host from a tunnel.",
+        fix: "Removed the standalone long-label trigger; every branch now requires clustering (many long AND unique labels, or high volume). max_label_len is kept as evidence only. Re-validated on real data: the attack fires, Atlassian clears.",
+      },
+      triage: "Treat an alert as SUSPICIOUS — Pending Confirmation, not a confirmed true positive, until the zone is corroborated with threat intel (domain age, registration, attribution). Then escalate to the response playbook.",
+      recommendedResponse: "Sinkhole the C2 zone and block it at the Gateway DNS layer, isolate the source host, and preserve DNS logs + PCAP for forensics. Full steps in the Response Playbook tab.",
+    }
   },
   {
     id: "exfil",

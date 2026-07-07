@@ -3,7 +3,8 @@ import { useParams, useNavigate, Link } from 'react-router-dom'
 import {
   ArrowLeft, Copy, Check, Play, Square, AlertTriangle,
   ChevronRight, Shield, Target, Layers, GitBranch, Terminal as TerminalIcon,
-  Settings as SettingsIcon, Info
+  Settings as SettingsIcon, Info, ExternalLink, ShieldCheck, CheckCircle2,
+  Radar, Crosshair
 } from 'lucide-react'
 import { SCENARIOS } from '../data/scenarios.js'
 import Badge from '../components/Badge.jsx'
@@ -63,6 +64,167 @@ function saveRunToHistory(scenario, lines, exitCode) {
     const trimmed = history.slice(-100)
     localStorage.setItem('oneflare_run_history', JSON.stringify(trimmed))
   } catch {}
+}
+
+function SectionHeader({ icon: Icon, title, accent = 'purple' }) {
+  const color = accent === 'orange' ? 'text-orange-400' : accent === 'green' ? 'text-green-400' : accent === 'blue' ? 'text-blue-400' : 'text-purple-400'
+  return (
+    <div className="flex items-center gap-2 mb-3">
+      <Icon className={`w-4 h-4 ${color}`} />
+      <h3 className="text-sm font-semibold text-slate-200 uppercase tracking-wider">{title}</h3>
+    </div>
+  )
+}
+
+// Rich, detection-engineer-focused SIEM view (used when a scenario defines `siem`).
+function RichSiemDetection({ scenario }) {
+  const s = scenario.siem
+  return (
+    <div className="space-y-5">
+      {/* Meta row */}
+      <div className="grid grid-cols-1 md:grid-cols-4 gap-3">
+        <MetaCard label="Detection Rule" value={s.ruleName} mono />
+        <MetaCard label="Rule Type" value={`${s.ruleType} · ${s.queryLang}`} />
+        <MetaCard label="Severity" value={<Badge type="severity" value={s.severity} />} />
+        <MetaCard label="Data Source" value={s.dataSource} />
+      </div>
+
+      {/* Validation banner */}
+      {s.validated && (
+        <div className="rounded-xl border border-green-500/25 bg-green-500/5 p-4 flex gap-3">
+          <CheckCircle2 className="w-5 h-5 text-green-400 shrink-0 mt-0.5" />
+          <div>
+            <p className="text-sm text-green-300 font-medium mb-1">Validated — 0 false positives</p>
+            <p className="text-xs text-slate-400 leading-relaxed">{s.validationNote}</p>
+          </div>
+        </div>
+      )}
+
+      {/* Why detect */}
+      <div className="rounded-xl bg-[#1a0a2e] border border-[#2d1b4e] p-5">
+        <SectionHeader icon={Info} title="Why detect this" accent="blue" />
+        <p className="text-sm text-slate-300 leading-relaxed mb-3">{s.importance}</p>
+        <ul className="space-y-1.5">
+          {s.whyDetect.map((w, i) => (
+            <li key={i} className="flex gap-2 text-sm text-slate-400 leading-relaxed">
+              <ChevronRight className="w-4 h-4 text-purple-400 shrink-0 mt-0.5" />
+              <span>{w}</span>
+            </li>
+          ))}
+        </ul>
+      </div>
+
+      {/* MITRE ATT&CK */}
+      <div className="rounded-xl bg-[#1a0a2e] border border-[#2d1b4e] p-5">
+        <SectionHeader icon={Crosshair} title="MITRE ATT&CK" accent="orange" />
+        <div className="grid grid-cols-1 sm:grid-cols-3 gap-3">
+          {s.mitre.map((m) => (
+            <a
+              key={m.id}
+              href={m.url}
+              target="_blank"
+              rel="noopener noreferrer"
+              className="group rounded-lg border border-[#2d1b4e] bg-white/3 p-3 hover:border-orange-500/40 transition-all"
+            >
+              <div className="flex items-center justify-between mb-1">
+                <span className="font-mono text-sm text-orange-400 font-semibold">{m.id}</span>
+                <ExternalLink className="w-3.5 h-3.5 text-slate-600 group-hover:text-orange-400 transition-colors" />
+              </div>
+              <div className="text-xs text-slate-500 mb-0.5">{m.tactic}</div>
+              <div className="text-sm text-slate-300 leading-snug">{m.name}</div>
+            </a>
+          ))}
+        </div>
+      </div>
+
+      {/* The detection query */}
+      <div className="rounded-xl bg-[#1a0a2e] border border-[#2d1b4e] p-5">
+        <div className="flex items-center justify-between mb-3">
+          <SectionHeader icon={TerminalIcon} title="PowerQuery Detection" />
+          <CopyButton text={s.query} label="Copy Query" />
+        </div>
+        <pre className="code-block text-xs leading-relaxed overflow-x-auto">
+          <code className="text-purple-300">{s.query}</code>
+        </pre>
+        <p className="text-xs text-slate-500 mt-2 leading-relaxed">
+          Scheduled-rule body for the SentinelOne SDL. Runs on a cadence over the lookback window and
+          emits one row per offending (source, zone). Deploy via the Detection rules API or paste into
+          a scheduled PowerQuery rule.
+        </p>
+      </div>
+
+      {/* How the query works */}
+      <div className="rounded-xl bg-[#1a0a2e] border border-[#2d1b4e] p-5">
+        <SectionHeader icon={Layers} title="How the query works" />
+        <div className="space-y-2.5">
+          {s.queryExplained.map((q, i) => (
+            <div key={i} className="flex flex-col sm:flex-row sm:items-baseline gap-1 sm:gap-3">
+              <code className="text-xs text-orange-300 font-mono bg-black/30 rounded px-2 py-1 shrink-0 sm:w-64 sm:whitespace-nowrap sm:overflow-hidden sm:text-ellipsis">{q.code}</code>
+              <span className="text-sm text-slate-400 leading-relaxed">{q.note}</span>
+            </div>
+          ))}
+        </div>
+      </div>
+
+      {/* Detection signals */}
+      <div className="rounded-xl bg-[#1a0a2e] border border-[#2d1b4e] p-5">
+        <SectionHeader icon={Radar} title="Detection signals" accent="green" />
+        <div className="overflow-x-auto">
+          <table className="w-full text-sm">
+            <thead>
+              <tr className="text-left text-xs text-slate-500 uppercase tracking-wider border-b border-[#2d1b4e]">
+                <th className="pb-2 pr-4 font-medium">Signal</th>
+                <th className="pb-2 pr-4 font-medium">Catches</th>
+                <th className="pb-2 font-medium">Why it works</th>
+              </tr>
+            </thead>
+            <tbody>
+              {s.signals.map((sig, i) => (
+                <tr key={i} className="border-b border-[#2d1b4e]/50 last:border-0">
+                  <td className="py-2.5 pr-4 align-top"><code className="text-xs text-purple-300 font-mono whitespace-nowrap">{sig.signal}</code></td>
+                  <td className="py-2.5 pr-4 align-top text-slate-300 whitespace-nowrap">{sig.catches}</td>
+                  <td className="py-2.5 align-top text-slate-400 leading-relaxed">{sig.why}</td>
+                </tr>
+              ))}
+            </tbody>
+          </table>
+        </div>
+      </div>
+
+      {/* Tuning & false positives */}
+      {s.falsePositive && (
+        <div className="rounded-xl bg-[#1a0a2e] border border-[#2d1b4e] p-5">
+          <SectionHeader icon={AlertTriangle} title="Tuning — how we reached 0 false positives" accent="orange" />
+          <div className="space-y-3">
+            <div>
+              <div className="text-xs text-slate-500 uppercase tracking-wider mb-1">Observed false positive</div>
+              <p className="text-sm text-slate-300 leading-relaxed">{s.falsePositive.finding}</p>
+            </div>
+            <div>
+              <div className="text-xs text-slate-500 uppercase tracking-wider mb-1">Root cause</div>
+              <p className="text-sm text-slate-300 leading-relaxed">{s.falsePositive.rootCause}</p>
+            </div>
+            <div>
+              <div className="text-xs text-green-500/80 uppercase tracking-wider mb-1">The fix</div>
+              <p className="text-sm text-slate-300 leading-relaxed">{s.falsePositive.fix}</p>
+            </div>
+          </div>
+        </div>
+      )}
+
+      {/* Triage + response */}
+      <div className="grid grid-cols-1 md:grid-cols-2 gap-3">
+        <div className="rounded-xl border border-blue-500/20 bg-blue-500/5 p-4">
+          <SectionHeader icon={ShieldCheck} title="Triage discipline" accent="blue" />
+          <p className="text-xs text-slate-400 leading-relaxed">{s.triage}</p>
+        </div>
+        <div className="rounded-xl border border-orange-500/20 bg-orange-500/5 p-4">
+          <SectionHeader icon={GitBranch} title="Recommended response" accent="orange" />
+          <p className="text-xs text-slate-400 leading-relaxed">{s.recommendedResponse}</p>
+        </div>
+      </div>
+    </div>
+  )
 }
 
 export default function ScenarioDetail() {
@@ -306,6 +468,9 @@ export default function ScenarioDetail() {
 
         {/* === SIEM DETECTION === */}
         {activeTab === 'siem' && (
+          scenario.siem ? (
+            <RichSiemDetection scenario={scenario} />
+          ) : (
           <div className="space-y-5">
             <div className="grid grid-cols-1 md:grid-cols-3 gap-3">
               <MetaCard label="Detection Rule" value={scenario.detectionRule} mono />
@@ -333,6 +498,7 @@ export default function ScenarioDetail() {
               </div>
             </div>
           </div>
+          )
         )}
 
         {/* === RESPONSE PLAYBOOK === */}
