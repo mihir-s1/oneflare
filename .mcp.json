@@ -15,6 +15,20 @@
     "cloudflare-logpush": {
       "type": "http",
       "url": "https://logs.mcp.cloudflare.com/mcp"
+    },
+    "s1-secops-mcp": {
+      "command": "docker",
+      "args": [
+        "run", "-i", "--rm", "--pull=missing",
+        "-e", "S1_CONSOLE_URL",
+        "-e", "S1_CONSOLE_API_TOKEN",
+        "ghcr.io/pmoses-s1/s1-mcps:1.2.2",
+        "s1-secops-mcp"
+      ],
+      "env": {
+        "S1_CONSOLE_URL": "${S1_CONSOLE_URL}",
+        "S1_CONSOLE_API_TOKEN": "${S1_CONSOLE_API_TOKEN}"
+      }
     }
   }
 }
