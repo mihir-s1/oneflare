@@ -49,44 +49,41 @@ Live validation note below for why:
 
 | Branch | Condition | Rationale |
 |---|---|---|
-| DGA / beaconing | `uniq_labels >= 15` | ~20 distinct random subdomains under one zone; benign hosts rarely hit 15 distinct labels under a single registered zone in an hour. Strong enough to stand alone. |
+| DGA / beaconing | `hi_entropy >= 10 AND uniq_labels >= 10` | Many DISTINCT, RANDOM (digit-mixed) subdomains. Entropy is the discriminator — a DGA is random; a cloud service that resolves many unique names is structured. Volume alone is **not** enough (see FP below). |
 | Long-label tunneling | `long_labels >= 5 AND uniq_labels >= 5` | dnscat2/iodine chunk data across **many long, unique** labels. Requiring ≥5 long **and** ≥5 unique kills the "one legit long SaaS label" false positive. |
 | Data-in-DNS exfil | `txt_long >= 3` | Base32 exfil emits multiple long-label TXT queries; DKIM/ESNI put the long data in the **response**, not the query name, so they don't trip this. |
-| High-entropy cluster | `hi_entropy >= 10 AND uniq_labels >= 5` | Automated digit-mixed labels, gated by variety so a single repeated hashed label can't accumulate. |
 
-**`max_label_len` is intentionally NOT a trigger** — it is emitted as an evidence
-column only. A DNS label is capped at **63 chars by spec**, so a lone long label
-tops out around 63 and cannot be distinguished from a legit long SaaS/CDN host.
+**`max_label_len` and raw `uniq_labels` are intentionally NOT standalone triggers** —
+both are emitted for context, but a lone long label (DNS labels cap at 63 chars by
+spec) or sheer subdomain volume (normal for cloud services) can't distinguish a
+tunnel from legitimate traffic. Randomness (entropy) + clustering is what does.
 
-## Live validation (2026-07-07)
+**Output:** the first column is `detection_time` (`simpledateformat(newest(timestamp))`).
+Schedule: **runInterval 15 min / lookback 15 min** (matched → contiguous, no gaps/overlap).
 
-Ran the hunt against real Gateway DNS data in the SDL (10-min window, 75 raw
-events). **Two rows returned** — a textbook true positive and false positive:
+## Live validation (2026-07-07, LRQ against real Gateway DNS)
 
-| src_ip | host | zone | total | uniq | max_len | long | txt | verdict |
-|---|---|---|---|---|---|---|---|---|
-| 104.28.153.15 | – | `acmecorp-lab.workers.dev` | 33 | **33** | 58 | **10** | **3** | ✅ **True positive** — the scenario. uniq==total (every query unique ⇒ DGA), 10 long tunnel labels, 3 base32 TXT exfil. Multiple independent branches fire. |
-| 104.28.173.219 | DESKTOP-7D4RCAM | `saas.atlassian.com` | 2 | 1 | 61 | 2 | 0 | ⚠️ **False positive** — only under the *old* thresholds. A single legit Atlassian host with a 61-char label, queried twice (A+AAAA). |
+Two tuning rounds, each driven by a real false positive:
 
-**What the FP taught us:** the old `max_label_len >= 50` clause fired on Atlassian
-(61-char label) with zero corroboration. Fix: drop the standalone long-label
-clause; require long-label tunneling to show **≥5 long AND ≥5 unique** labels.
-Re-checked against both real rows: attack → **ALERT**, Atlassian → **clear**. A
-heavier benign SaaS user (4 long/4 unique) also stays clear.
+| Round | zone | uniq | long | txt | hi_entropy | verdict under OLD rule | fix |
+|---|---|---|---|---|---|---|---|
+| 1 | `saas.atlassian.com` | 1 | 2 | 0 | 0 | ⚠️ FP (tripped `max_label_len ≥ 50`) | dropped standalone long-label trigger |
+| 2 | `cloudapp.azure.com` | **67** | 0 | 0 | **0** | ⚠️ FP (tripped `uniq_labels ≥ 15`) | gated the volume branch on entropy |
+| ✓ | `acmecorp-lab.workers.dev` (attack ×2) | 33 | 10 | 3 | 28–29 | ✅ TP (fires on all branches) | — |
 
-Earlier static simulation against the raw attack payloads scored the malicious
-group `uniq=33, long=10, maxLen=54, txtLong=3, hi=29` — consistent with the live TP.
-Benign domains (`time.cloudflare.com`, `google`, `github`) did not fire.
+**The lesson:** neither long labels nor high subdomain cardinality is malicious on
+its own — legit SaaS/CDN (Atlassian, Azure) produce both. DNS tunneling / DGA is
+distinguished by **randomness**. Final filter: `(hi_entropy ≥ 10 AND uniq_labels ≥ 10)
+OR (long_labels ≥ 5 AND uniq_labels ≥ 5) OR txt_long ≥ 3`. Re-validated live: both
+attack runs fire, both Azure and Atlassian clear → **0 false positives**.
 
 ### Tuning
 
-- Raise `uniq_labels` / `hi_entropy` if a chatty legit host with many hashed CDN
-  labels (Akamai/CloudFront style) produces noise. Because those labels are usually
-  < 40 chars and appear under a different zone per vendor, they rarely clear the
-  clustering thresholds — but if they do, lift `hi_entropy` to 15 first (it's the
-  softest signal), keep `long_labels`/`txt_long` where they are.
-- For a busier tenant, keep `runIntervalMinutes == lookbackWindowMinutes` (60/60)
-  to avoid overlapping/duplicate alerts.
+- If a chatty legit host with hashed CDN labels ever produces noise, raise
+  `hi_entropy` first (softest signal); keep `long_labels`/`txt_long` as-is.
+- **Testing cadence is 15/15** for fast validation feedback. For a busier production
+  tenant widen to 60/60 (keep `runIntervalMinutes == lookbackWindowMinutes` to avoid
+  overlap), or lengthen only the lookback to catch slow (hours-apart) beacons.
 - If the group intermediate ever approaches the 1,000-row alert budget, tighten the
   initial filter (e.g. add `query.type in ('A','AAAA','TXT')`).
 

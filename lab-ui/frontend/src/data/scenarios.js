@@ -230,7 +230,7 @@ THRESHOLD: 10 queries to same root domain
       dataSource: "Cloudflare Gateway DNS → OCSF DNS Activity (class_uid 4003)",
       severity: "High",
       validated: true,
-      validationNote: "Live-validated against real Gateway DNS data — 0 false positives after tuning. The attack source scored uniq=33 / long=10 / txt=3 (fires on multiple branches); benign domains (time.cloudflare.com, google, github, saas.atlassian.com) all cleared.",
+      validationNote: "Live-validated against real Gateway DNS data (LRQ) — 0 false positives after tuning. The attack source scored uniq=33 / long=10 / txt=3 / hi_entropy=28 and fires; benign high-cardinality/long-label domains (cloudapp.azure.com at 67 unique labels, saas.atlassian.com, time.cloudflare.com, google, github) all clear. Runs every 15 minutes over a 15-minute lookback.",
       importance: "DNS is the internet's most overlooked exfiltration and command-and-control channel. It is almost always allowed outbound, rarely deep-inspected, and keeps working when HTTP/S egress is blocked — which is exactly why attackers tunnel data and C2 traffic through it. Because the traffic looks like ordinary name resolution, only behavioral analytics (not signatures) reliably catch it.",
       whyDetect: [
         "Covert channel that bypasses web proxies and TLS inspection — DNS egress is open on nearly every network.",
@@ -260,8 +260,11 @@ THRESHOLD: 10 queries to same root domain
     first_seen    = oldest(timestamp),
     last_seen     = newest(timestamp)
   by src_ip, host, zone
-| filter uniq_labels >= 15 OR (long_labels >= 5 AND uniq_labels >= 5) OR txt_long >= 3 OR (hi_entropy >= 10 AND uniq_labels >= 5)
+| filter (hi_entropy >= 10 AND uniq_labels >= 10) OR (long_labels >= 5 AND uniq_labels >= 5) OR txt_long >= 3
+| let reason = txt_long >= 3 ? 'Data-in-DNS exfil (TXT long labels)' : ((long_labels >= 5 AND uniq_labels >= 5) ? 'Long-label DNS tunneling' : 'DGA / high-entropy beaconing')
+| let detection_time = simpledateformat(last_seen, 'yyyy-MM-dd HH:mm:ss z')
 | sort -uniq_labels
+| columns detection_time, src_ip, host, zone, reason, total_queries, uniq_labels, long_labels, txt_long, hi_entropy, max_label_len, evidence, device_uid, first_seen
 | limit 100`,
       queryExplained: [
         { code: "class_uid=4003 · dataSource.cloudflare_dataset='Gateway DNS'", note: "Scope to Cloudflare Gateway DNS events, normalized to the OCSF DNS Activity class." },
@@ -270,13 +273,13 @@ THRESHOLD: 10 queries to same root domain
         { code: "zone = rightmost 3 labels", note: "Registered-zone proxy so the beacon. / update. / c2tunnel. prefixes roll up into one group (no PSL available in PQ)." },
         { code: "digit_ratio = digits / length", note: "Entropy proxy — SDL PQ has no Shannon-entropy function; digit-mixed labels signal machine generation." },
         { code: "group … by src_ip, host, zone", note: "Aggregate per source + zone. Tunneling is a statistical pattern across many queries, never a single event." },
-        { code: "filter (clustered signals)", note: "Every branch requires clustering — many long AND unique labels, or high volume — never a single weak signal." },
+        { code: "filter (clustered + entropy)", note: "Every branch requires clustering, and the high-volume branch is gated on entropy — volume alone is legit for cloud services (see tuning)." },
+        { code: "detection_time (first column)", note: "simpledateformat(newest(timestamp)) — the most recent matching query in the window, projected first so the alert leads with when it happened." },
       ],
       signals: [
-        { signal: "uniq_labels ≥ 15", catches: "DGA / C2 beaconing", why: "Malware mints a fresh random subdomain per check-in; a human revisits the same names." },
+        { signal: "hi_entropy ≥ 10 AND uniq_labels ≥ 10", catches: "DGA / C2 beaconing", why: "Many DISTINCT, RANDOM (digit-mixed) subdomains. Entropy is what separates a DGA from a cloud service that also resolves many unique names." },
         { signal: "long_labels ≥ 5 AND uniq_labels ≥ 5", catches: "dnscat2 / iodine tunneling", why: "Data chunked across many long, unique labels — not one legitimate long CDN host." },
         { signal: "txt_long ≥ 3", catches: "Data-in-DNS exfiltration", why: "Base32 payloads in TXT query names; DKIM/ESNI put data in the response, not the query name." },
-        { signal: "hi_entropy ≥ 10 AND uniq_labels ≥ 5", catches: "High-entropy DGA labels", why: "Digit-mixed automated labels, gated by variety so a single repeated hash can't trip it." },
       ],
       mitre: [
         { id: "T1071.004", tactic: "Command & Control", name: "Application Layer Protocol: DNS", url: "https://attack.mitre.org/techniques/T1071/004/" },
@@ -284,9 +287,9 @@ THRESHOLD: 10 queries to same root domain
         { id: "T1568.002", tactic: "Command & Control", name: "Dynamic Resolution: Domain Generation Algorithms", url: "https://attack.mitre.org/techniques/T1568/002/" },
       ],
       falsePositive: {
-        finding: "Live validation surfaced one false positive: saas.atlassian.com (a 61-character subdomain label) tripped the original standalone \"max_label_len ≥ 50\" rule.",
-        rootCause: "A DNS label is capped at 63 characters by spec — so a single long label maxes out around 63 for everyone and cannot distinguish a legitimate SaaS/CDN host from a tunnel.",
-        fix: "Removed the standalone long-label trigger; every branch now requires clustering (many long AND unique labels, or high volume). max_label_len is kept as evidence only. Re-validated on real data: the attack fires, Atlassian clears.",
+        finding: "Two false positives surfaced during live validation: saas.atlassian.com (a 61-char subdomain label) tripped the original \"max_label_len ≥ 50\" rule, and cloudapp.azure.com (67 unique Azure hostnames, zero entropy) tripped the \"uniq_labels ≥ 15\" volume rule.",
+        rootCause: "Neither long labels nor high subdomain cardinality is malicious on its own. A DNS label is capped at 63 chars by spec (so one long label can't be told from a tunnel), and legit cloud services (Azure/AWS/CDN) resolve dozens of unique, structured hostnames. What actually distinguishes DNS tunneling / DGA is RANDOMNESS — high-entropy, digit-mixed, or long labels.",
+        fix: "Removed the standalone long-label and standalone volume triggers. The high-volume branch is now gated on entropy (hi_entropy ≥ 10 AND uniq_labels ≥ 10); tunneling requires long AND unique; exfil requires repeated long TXT. Re-validated on real data: the two attack runs fire, both Azure and Atlassian clear (0 FP).",
       },
       triage: "Treat an alert as SUSPICIOUS — Pending Confirmation, not a confirmed true positive, until the zone is corroborated with threat intel (domain age, registration, attribution). Then escalate to the response playbook.",
       recommendedResponse: "Sinkhole the C2 zone and block it at the Gateway DNS layer, isolate the source host, and preserve DNS logs + PCAP for forensics. Full steps in the Response Playbook tab.",

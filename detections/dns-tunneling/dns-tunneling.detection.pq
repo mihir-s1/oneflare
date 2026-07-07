@@ -41,7 +41,15 @@ class_uid=4003 dataSource.cloudflare_dataset='Gateway DNS' unmapped.QueryName=*
 // removed after it produced a false positive in testing (see README). Tunneling
 // shows up as MANY long, UNIQUE labels; DGA as high unique-subdomain volume;
 // exfil as repeated long TXT. max_label_len stays as evidence, never a trigger.
-| filter uniq_labels >= 15 OR (long_labels >= 5 AND uniq_labels >= 5) OR txt_long >= 3 OR (hi_entropy >= 10 AND uniq_labels >= 5)
-| let reason = uniq_labels >= 15 ? 'DGA / high unique-subdomain volume' : (txt_long >= 3 ? 'Data-in-DNS exfil (TXT long labels)' : (long_labels >= 5 ? 'Long-label DNS tunneling' : 'High-entropy label cluster'))
+// Volume alone is NOT a signal — legit cloud services (Azure/AWS/CDN) resolve
+// dozens of unique, structured subdomains (observed FP: cloudapp.azure.com, 67
+// unique labels, 0 entropy). Real DGA/tunneling labels are RANDOM: high entropy
+// (digit-mixed) or long. So the high-volume branch is gated on hi_entropy, and
+// every branch requires clustering. (Attack: uniq=33/hi=28/long=10/txt=3.)
+| filter (hi_entropy >= 10 AND uniq_labels >= 10) OR (long_labels >= 5 AND uniq_labels >= 5) OR txt_long >= 3
+| let reason = txt_long >= 3 ? 'Data-in-DNS exfil (TXT long labels)' : ((long_labels >= 5 AND uniq_labels >= 5) ? 'Long-label DNS tunneling' : 'DGA / high-entropy beaconing')
+| let detection_time = simpledateformat(last_seen, 'yyyy-MM-dd HH:mm:ss z')
 | sort -uniq_labels
+// detection_time (most-recent matching query in the window) is projected FIRST.
+| columns detection_time, src_ip, host, zone, reason, total_queries, uniq_labels, long_labels, txt_long, hi_entropy, max_label_len, evidence, device_uid, first_seen
 | limit 100
