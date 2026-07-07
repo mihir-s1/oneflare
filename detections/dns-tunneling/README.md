@@ -150,6 +150,14 @@ curl -s -X POST "$S1_CONSOLE_URL/sdl/v2/api/queries" \
 On 0 rows: check `matchCount` vs row count and widen the window last; confirm
 `unmapped.QueryName` is populated (NOT `query.hostname`).
 
+> **Must be a Scheduled rule.** This body is PowerQuery (it uses `|` pipes and
+> aggregation — `group` / `count` / `estimate_distinct`). A single-event **STAR**
+> rule validates as S1QL and rejects the pipe with *"Don't understand [|] — try
+> enclosing it in quotes."* The SDL search box runs it fine (PowerQuery), but the
+> rule must be created with `queryType:"scheduled"` + `queryLang:"2.0"` (as in
+> `dns-tunneling.rule.json`). Rule of thumb: query has a `|` → Scheduled rule;
+> no pipes (one event matches a filter) → STAR/single-event.
+
 ### 2. Create the rule
 
 Replace `<ACCOUNT_ID>` in `dns-tunneling.rule.json`, then:

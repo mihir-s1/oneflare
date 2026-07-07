@@ -148,9 +148,22 @@ function RichSiemDetection({ scenario }) {
         </pre>
         <p className="text-xs text-slate-500 mt-2 leading-relaxed">
           Scheduled-rule body for the SentinelOne SDL. Runs on a cadence over the lookback window and
-          emits one row per offending (source, zone). Deploy via the Detection rules API or paste into
-          a scheduled PowerQuery rule.
+          emits one row per offending (source, zone).
         </p>
+        <div className="mt-3 rounded-lg border border-amber-500/25 bg-amber-500/5 p-3 flex gap-2.5">
+          <AlertTriangle className="w-4 h-4 text-amber-400 shrink-0 mt-0.5" />
+          <div className="text-xs text-slate-400 leading-relaxed">
+            <span className="text-amber-300 font-medium">Deploy as a Scheduled rule</span>{' '}
+            (<code className="text-amber-300/90">queryType: scheduled</code>,{' '}
+            <code className="text-amber-300/90">queryLang: 2.0</code>). This is a PowerQuery — the{' '}
+            <code className="text-amber-300/90">|</code> pipe is rejected by a single-event{' '}
+            <span className="font-medium">STAR</span> rule with{' '}
+            <span className="italic">“Don't understand [|] — try enclosing it in quotes.”</span>{' '}
+            It requires aggregation (<code>group</code> / <code>count</code>), which only scheduled
+            rules run. Rule of thumb: a query with a <code className="text-amber-300/90">|</code> →
+            Scheduled rule; no pipes → STAR/single-event.
+          </div>
+        </div>
       </div>
 
       {/* How the query works */}
