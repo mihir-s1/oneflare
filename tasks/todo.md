@@ -138,17 +138,26 @@ S1 site OneFlare id 2433185103040607397. Only Gateway HTTP/DNS + ZT + Audit flow
       /training-data ×2, /users ×2). Both scenarios' data reaches the SDL.
       NOTE: live site needs a backend redeploy to expose bot/promptinj (container
       still runs old main.py) — `cd lab-ui && set -a; source ../.env.local; set +a; npx wrangler@4.77.0 deploy`.
-- [ ] #4 BLOCKED on token permission. CLOUDFLARE_API_TOKEN can read the zone but
-      CANNOT read or edit Logpush jobs — GET /zones/{zone}/logpush/jobs → 403
-      "Authentication error" (code 10000). The token is missing the **Zone > Logs >
-      Edit** permission group for one-flare.com. Only one CF token in .env.local (no
-      global key). USER ACTION: add "Logs Edit" to the token (dash → My Profile → API
-      Tokens → edit CLOUDFLARE_API_TOKEN → add permission Zone · Logs · Edit, scoped
-      to one-flare.com), OR add the Bot Management fields to the http_requests job in
-      the dashboard (Analytics & Logs → Logpush → http_requests job → Configure fields).
-      Fields to ADD: BotScore, BotScoreSrc, BotTags, JA3Hash, JA4, JA4Signals,
-      VerifiedBotCategory, ClientRequestUserAgent (if not already present). Once Logs
-      Edit is granted I can PATCH job 1769149's output_options.field_names via API.
+- [~] #4 Token permission RESOLVED (user added Zone·Logs·Edit — can now read/write
+      Logpush job 1769149). BUT #4 is BLOCKED on a deeper ENTITLEMENT gap:
+      **BotScore / JA3Hash / JA4 / JA4Signals / BotTags / BotDetectionIDs are NOT in
+      the http_requests Logpush field catalog for this zone** (checked GET
+      /zones/{zone}/logpush/datasets/http_requests/fields → 105 fields, none of them).
+      The zone has **Super Bot Fight Mode** (bot_management config uses sbfm_* keys),
+      NOT the enterprise **Bot Management add-on** that emits BotScore/JA to Logpush.
+      You cannot add a field Cloudflare doesn't offer for the dataset — no token/job
+      edit fixes this. Polymorphic-bot detection (low BotScore + constant JA4 across
+      rotating UAs) cannot be fed via Logpush until the add-on is provisioned.
+      → USER ACTION (2026-07-08): asked Cloudflare team to provision enterprise Bot
+        Management on one-flare.com so BotScore/JA3Hash/JA4/JA4Signals/BotTags/
+        BotDetectionIDs appear in the catalog. Awaiting their update. Then: re-run the
+        fields query; if present, PATCH job 1769149 output_options.field_names.
+      → Only bot signal available today: VerifiedBotCategory (already on the job).
+        Bot scenario's documented fallback = VerifiedBotCategory + UA rotation + volume.
+      DECISION: leave the Logpush job UNTOUCHED for now (user will return with updates).
+      AVAILABLE-BUT-NOT-ADDED (for later, serves promptinj/#6, not bot): AISecurity
+      InjectionScore, AISecurityPIICategories, AISecurityTokenCount,
+      AISecurityUnsafeTopicCategories (FirewallForAIInjectionScore already on job).
 
 ## Path A — DATA PATH COMPLETE (2026-07-07, later)
 - [x] HEC creds validated (S1_HEC_INGEST_URL 57ch, S1_HEC_INGEST_TOKEN 65ch) — read via python-dotenv (bash `source` chokes on file; use dotenv).
