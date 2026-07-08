@@ -133,6 +133,11 @@ S1 site OneFlare id 2433185103040607397. Only Gateway HTTP/DNS + ZT + Audit flow
       to api.one-flare.com lacks those bait routes AND /api/v1/chat (the latter is #6).
       404s still generate http_requests logs (the fallback volume/UA signal), so the
       data path is intact; bot DETECTION needs #4 (Bot Mgmt fields), promptinj needs #6.
+      CONFIRMED IN S1 (LRQ, class_uid 4002): promptinj POST /api/v1/chat ×16;
+      bot probe paths landed (/api/v1/models ×6, /admin ×5, ?include_weights ×4,
+      /training-data ×2, /users ×2). Both scenarios' data reaches the SDL.
+      NOTE: live site needs a backend redeploy to expose bot/promptinj (container
+      still runs old main.py) — `cd lab-ui && set -a; source ../.env.local; set +a; npx wrangler@4.77.0 deploy`.
 - [ ] #4 BLOCKED on token permission. CLOUDFLARE_API_TOKEN can read the zone but
       CANNOT read or edit Logpush jobs — GET /zones/{zone}/logpush/jobs → 403
       "Authentication error" (code 10000). The token is missing the **Zone > Logs >
