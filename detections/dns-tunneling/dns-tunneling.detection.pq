@@ -48,7 +48,7 @@ class_uid=4003 dataSource.cloudflare_dataset='Gateway DNS' unmapped.QueryName=*
 // every branch requires clustering. (Attack: uniq=33/hi=28/long=10/txt=3.)
 | filter (hi_entropy >= 10 AND uniq_labels >= 10) OR (long_labels >= 5 AND uniq_labels >= 5) OR txt_long >= 3
 | let reason = txt_long >= 3 ? 'Data-in-DNS exfil (TXT long labels)' : ((long_labels >= 5 AND uniq_labels >= 5) ? 'Long-label DNS tunneling' : 'DGA / high-entropy beaconing')
-| let detection_time = simpledateformat(last_seen, 'yyyy-MM-dd HH:mm:ss z')
+| let detection_time = simpledateformat(last_seen, 'yyyy-MM-dd HH:mm:ss z', 'America/Chicago')
 | sort -uniq_labels
 // detection_time (most-recent matching query in the window) is projected FIRST.
 | columns detection_time, src_ip, host, zone, reason, total_queries, uniq_labels, long_labels, txt_long, hi_entropy, max_label_len, evidence, device_uid, first_seen

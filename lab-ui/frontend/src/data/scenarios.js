@@ -77,7 +77,7 @@ THRESHOLD: 5 events in 60 seconds from same ClientIP`,
     last_seen  = newest(timestamp)
   by src_ip, host
 | filter attempts >= 3
-| let detection_time = simpledateformat(last_seen, 'yyyy-MM-dd HH:mm:ss z')
+| let detection_time = simpledateformat(last_seen, 'yyyy-MM-dd HH:mm:ss z', 'America/Chicago')
 | sort -attempts
 | columns detection_time, src_ip, host, attempts, min_sqli, min_waf, paths, method, evidence, ray, first_seen
 | limit 100`,
@@ -186,7 +186,7 @@ THRESHOLD: 5 events in 60 seconds from same ClientIP`,
     last_seen  = newest(timestamp)
   by src_ip, host
 | filter attempts >= 2
-| let detection_time = simpledateformat(last_seen, 'yyyy-MM-dd HH:mm:ss z')
+| let detection_time = simpledateformat(last_seen, 'yyyy-MM-dd HH:mm:ss z', 'America/Chicago')
 | sort -attempts
 | columns detection_time, src_ip, host, attempts, min_xss, uri_hits, bypasses, paths, method, evidence, ray, first_seen
 | limit 100`,
@@ -293,7 +293,7 @@ THRESHOLD: 3 events in 30 seconds from same ClientIP`,
     last_seen  = newest(timestamp)
   by src_ip, host
 | filter attempts >= 3
-| let detection_time = simpledateformat(last_seen, 'yyyy-MM-dd HH:mm:ss z')
+| let detection_time = simpledateformat(last_seen, 'yyyy-MM-dd HH:mm:ss z', 'America/Chicago')
 | sort -attempts
 | columns detection_time, src_ip, host, attempts, trav_hits, rce_hits, min_rce, paths, method, evidence, ray, first_seen
 | limit 100`,
@@ -397,7 +397,7 @@ THRESHOLD: 20 distinct UserEmail values
   by host
 | filter failed_logins >= 10
 | let mode = distinct_ips >= 5 ? 'Credential stuffing (rotating IPs)' : 'Brute force (single/few IPs)'
-| let detection_time = simpledateformat(last_seen, 'yyyy-MM-dd HH:mm:ss z')
+| let detection_time = simpledateformat(last_seen, 'yyyy-MM-dd HH:mm:ss z', 'America/Chicago')
 | sort -failed_logins
 | columns detection_time, host, mode, failed_logins, distinct_ips, statuses, ip_sample, ray, first_seen
 | limit 100`,
@@ -507,7 +507,7 @@ THRESHOLD: 10 queries to same root domain
   by src_ip, host, zone
 | filter (hi_entropy >= 10 AND uniq_labels >= 10) OR (long_labels >= 5 AND uniq_labels >= 5) OR txt_long >= 3
 | let reason = txt_long >= 3 ? 'Data-in-DNS exfil (TXT long labels)' : ((long_labels >= 5 AND uniq_labels >= 5) ? 'Long-label DNS tunneling' : 'DGA / high-entropy beaconing')
-| let detection_time = simpledateformat(last_seen, 'yyyy-MM-dd HH:mm:ss z')
+| let detection_time = simpledateformat(last_seen, 'yyyy-MM-dd HH:mm:ss z', 'America/Chicago')
 | sort -uniq_labels
 | columns detection_time, src_ip, host, zone, reason, total_queries, uniq_labels, long_labels, txt_long, hi_entropy, max_label_len, evidence, device_uid, first_seen
 | limit 100`,
@@ -623,7 +623,7 @@ THRESHOLD: 10 matching events from same ClientIP
   by src_ip, host
 | filter big_resp >= 5 OR sensitive_hits >= 10 OR (sensitive_hits >= 6 AND distinct_paths >= 4)
 | let reason = big_resp >= 5 ? 'Bulk data pull (large responses)' : 'Repeated sensitive-endpoint access / enumeration'
-| let detection_time = simpledateformat(last_seen, 'yyyy-MM-dd HH:mm:ss z')
+| let detection_time = simpledateformat(last_seen, 'yyyy-MM-dd HH:mm:ss z', 'America/Chicago')
 | sort -total_bytes
 | columns detection_time, src_ip, host, reason, requests, sensitive_hits, distinct_paths, big_resp, max_bytes, total_bytes, successes, evidence, ray, first_seen
 | limit 100`,
@@ -726,7 +726,7 @@ THRESHOLD: >=10 requests from same JA4`,
     last_seen    = newest(timestamp)
   by ja4, host
 | filter distinct_ua >= 5 AND distinct_ja4 = 1 AND requests >= 10 AND min_bot <= 30
-| let detection_time = simpledateformat(last_seen, 'yyyy-MM-dd HH:mm:ss z')
+| let detection_time = simpledateformat(last_seen, 'yyyy-MM-dd HH:mm:ss z', 'America/Chicago')
 | sort -requests
 | columns detection_time, ja4, host, requests, distinct_ua, min_bot, paths, ip_sample, ua_sample, first_seen
 | limit 100`,
@@ -827,7 +827,7 @@ THRESHOLD: >=10 POSTs from same ClientIP
     last_seen    = newest(timestamp)
   by src_ip, host
 | filter posts >= 10
-| let detection_time = simpledateformat(last_seen, 'yyyy-MM-dd HH:mm:ss z')
+| let detection_time = simpledateformat(last_seen, 'yyyy-MM-dd HH:mm:ss z', 'America/Chicago')
 | sort -posts
 | columns detection_time, src_ip, host, posts, distinct_ua, served, blocked, ray, first_seen
 | limit 100`,
