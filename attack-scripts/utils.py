@@ -64,7 +64,25 @@ def random_headers(extra: dict = None) -> dict:
 
 
 def jitter(base: float = 0.5, variance: float = 1.5) -> None:
-    """Random delay to simulate human/tool timing."""
+    """Random delay to simulate human/tool timing.
+
+    ATTACK_DELAY / ATTACK_JITTER env vars (set by the lab-ui backend from the
+    Settings 'Attack delay' / 'Jitter' controls) act as a GLOBAL override of the
+    per-call base/variance when present, so the UI timing knobs actually work.
+    """
+    import os
+    env_base = os.getenv("ATTACK_DELAY")
+    env_var = os.getenv("ATTACK_JITTER")
+    if env_base is not None:
+        try:
+            base = float(env_base)
+        except ValueError:
+            pass
+    if env_var is not None:
+        try:
+            variance = float(env_var)
+        except ValueError:
+            pass
     time.sleep(base + random.uniform(0, variance))
 
 

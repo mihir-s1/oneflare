@@ -50,9 +50,50 @@ SCENARIO_SCRIPTS = {
 }
 
 
+# ---------------------------------------------------------------------------
+# Server-side, non-sensitive run configuration.
+#
+# These are the defaults that let ANYONE hitting the site run scenarios without
+# configuring anything in their browser — they persist across users/browsers
+# because they live on the server, not in localStorage. Everything here is
+# non-sensitive (target hostnames, timing); NO API tokens or account/zone IDs.
+# Each value is env-overridable so a partner can point their own deployment at
+# their own NFR (LAB_CF_DOMAIN etc. in .env); the baked fallback is the shared
+# reference instance (one-flare.com) so our instance works with zero config.
+# ---------------------------------------------------------------------------
+def build_server_config() -> dict:
+    domain = os.getenv("LAB_CF_DOMAIN") or "one-flare.com"
+    def _f(name, default):
+        try:
+            return float(os.getenv(name, default))
+        except (TypeError, ValueError):
+            return float(default)
+    return {
+        "domain": domain,
+        "shop_url":   os.getenv("LAB_SHOP_URL")   or f"https://shop.{domain}",
+        "portal_url": os.getenv("LAB_PORTAL_URL") or f"https://portal.{domain}",
+        "api_url":    os.getenv("LAB_API_URL")    or f"https://api.{domain}",
+        "gateway_doh_url": os.getenv("LAB_GATEWAY_DOH_URL", ""),
+        "delay":  _f("LAB_ATTACK_DELAY", "0.5"),
+        "jitter": _f("LAB_ATTACK_JITTER", "0.3"),
+        "s1_console_url": os.getenv("LAB_S1_CONSOLE_URL", ""),  # display-only, non-secret
+    }
+
+
+SERVER_CONFIG = build_server_config()
+
+
 @app.get("/api/health")
 async def health():
     return {"status": "ok"}
+
+
+@app.get("/api/config")
+async def get_config():
+    """Non-sensitive, server-side run defaults (domain, target URLs, DoH, timing).
+    The frontend loads these so a fresh browser is pre-configured and can run
+    scenarios immediately. NO tokens or account/zone IDs are ever returned here."""
+    return SERVER_CONFIG
 
 
 @app.post("/api/test-connection")
@@ -78,22 +119,22 @@ async def run_scenario(websocket: WebSocket, scenario_id: str):
     config_msg = await websocket.receive_text()
     config = json.loads(config_msg)
 
+    # Effective config = client-sent value (per-user override) → server default.
+    # This means a browser that sends nothing still runs against the baked
+    # SERVER_CONFIG (so anyone can generate data with zero configuration).
     env = os.environ.copy()
-    # Default to the live attack surface; `or` also covers an empty-string domain
-    # sent by a browser whose Settings field was never filled in.
-    env["CLOUDFLARE_DOMAIN"] = config.get("domain") or "one-flare.com"
-    if config.get("shop_url"):
-        env["SHOP_URL_OVERRIDE"] = config["shop_url"]
-    if config.get("portal_url"):
-        env["PORTAL_URL_OVERRIDE"] = config["portal_url"]
-    if config.get("api_url"):
-        env["API_URL_OVERRIDE"] = config["api_url"]
-    if config.get("delay"):
-        env["ATTACK_DELAY"] = str(config["delay"])
-    if config.get("jitter"):
-        env["ATTACK_JITTER"] = str(config["jitter"])
-    if config.get("gateway_doh_url"):
-        env["CF_GATEWAY_DOH_URL"] = config["gateway_doh_url"]
+    env["CLOUDFLARE_DOMAIN"]   = config.get("domain")     or SERVER_CONFIG["domain"]
+    env["SHOP_URL_OVERRIDE"]   = config.get("shop_url")   or SERVER_CONFIG["shop_url"]
+    env["PORTAL_URL_OVERRIDE"] = config.get("portal_url") or SERVER_CONFIG["portal_url"]
+    env["API_URL_OVERRIDE"]    = config.get("api_url")    or SERVER_CONFIG["api_url"]
+    # delay/jitter can legitimately be 0, so fall back only when truly absent.
+    delay  = config.get("delay")
+    jitter = config.get("jitter")
+    env["ATTACK_DELAY"]  = str(delay  if delay  is not None else SERVER_CONFIG["delay"])
+    env["ATTACK_JITTER"] = str(jitter if jitter is not None else SERVER_CONFIG["jitter"])
+    doh = config.get("gateway_doh_url") or SERVER_CONFIG["gateway_doh_url"]
+    if doh:
+        env["CF_GATEWAY_DOH_URL"] = doh
 
     if scenario_id == "all":
         cmd = [sys.executable, str(SCRIPTS_DIR / "demo.py")]

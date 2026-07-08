@@ -255,22 +255,36 @@ export default function ScenarioDetail() {
   const [duration, setDuration] = useState(null)
   const wsRef = useRef(null)
 
-  // Settings
-  const domain = localStorage.getItem('oneflare_cf_domain') || ''
-  const shopUrl = localStorage.getItem('oneflare_shop_url') || ''
-  const portalUrl = localStorage.getItem('oneflare_portal_url') || ''
-  const apiUrl = localStorage.getItem('oneflare_api_url') || ''
-  const attackDelay = localStorage.getItem('oneflare_attack_delay') || '0.5'
-  const attackJitter = localStorage.getItem('oneflare_attack_jitter') || '0.3'
-  const gatewayDohUrl = localStorage.getItem('oneflare_cf_gateway_doh_url') || ''
-
-  const isConfigured = !!domain
+  // Non-sensitive run config is served by the backend (GET /api/config) so a
+  // fresh browser is pre-configured and anyone can run scenarios with zero setup.
+  // A per-user localStorage value still overrides the server default.
+  const [serverConfig, setServerConfig] = useState(null)
+  useEffect(() => {
+    let alive = true
+    fetch('/api/config')
+      .then(r => (r.ok ? r.json() : null))
+      .then(cfg => { if (alive) setServerConfig(cfg) })
+      .catch(() => {})
+    return () => { alive = false }
+  }, [])
 
   useEffect(() => {
     return () => {
       wsRef.current?.close()
     }
   }, [])
+
+  // Effective config: localStorage override → server default → hardcoded.
+  const ls = (k) => localStorage.getItem(k) || ''
+  const domain = ls('oneflare_cf_domain') || serverConfig?.domain || ''
+  const shopUrl = ls('oneflare_shop_url') || serverConfig?.shop_url || ''
+  const portalUrl = ls('oneflare_portal_url') || serverConfig?.portal_url || ''
+  const apiUrl = ls('oneflare_api_url') || serverConfig?.api_url || ''
+  const attackDelay = ls('oneflare_attack_delay') || String(serverConfig?.delay ?? '0.5')
+  const attackJitter = ls('oneflare_attack_jitter') || String(serverConfig?.jitter ?? '0.3')
+  const gatewayDohUrl = ls('oneflare_cf_gateway_doh_url') || serverConfig?.gateway_doh_url || ''
+
+  const isConfigured = !!domain
 
   if (!scenario) {
     return (

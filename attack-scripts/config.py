@@ -11,15 +11,18 @@ load_dotenv(Path(__file__).parent.parent / ".env.local")
 # collapse to "https://shop." — fall back to the live domain instead.
 DOMAIN = os.getenv("CLOUDFLARE_DOMAIN") or "one-flare.com"
 
-# Target URLs — workers.dev by default, auto-swaps when CLOUDFLARE_DOMAIN is a custom domain
-if "workers.dev" in DOMAIN:
-    SHOP_URL   = f"https://acmecorp-shop.{DOMAIN}"
-    PORTAL_URL = f"https://acmecorp-portal.{DOMAIN}"
-    API_URL    = f"https://acmecorp-api.{DOMAIN}"
-else:
-    SHOP_URL   = f"https://shop.{DOMAIN}"
-    PORTAL_URL = f"https://portal.{DOMAIN}"
-    API_URL    = f"https://api.{DOMAIN}"
+# Target URLs. An explicit *_URL_OVERRIDE (set by the lab-ui backend from the
+# effective server/client config) wins; otherwise derive from the domain.
+# workers.dev fallback uses the novamind-* worker names that cloudflare/setup.sh
+# deploys; a custom domain uses shop|portal|api.<domain>.
+def _derive_url(svc_workers: str, svc_custom: str) -> str:
+    if "workers.dev" in DOMAIN:
+        return f"https://{svc_workers}.{DOMAIN}"
+    return f"https://{svc_custom}.{DOMAIN}"
+
+SHOP_URL   = os.getenv("SHOP_URL_OVERRIDE")   or _derive_url("novamind-shop",   "shop")
+PORTAL_URL = os.getenv("PORTAL_URL_OVERRIDE") or _derive_url("novamind-portal", "portal")
+API_URL    = os.getenv("API_URL_OVERRIDE")    or _derive_url("novamind-api",    "api")
 
 # Lab credentials (match Wrangler secrets or Worker defaults)
 PORTAL_USERNAME = os.getenv("PORTAL_USERNAME", "admin@acmecorp.com")

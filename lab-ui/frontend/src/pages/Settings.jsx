@@ -270,6 +270,18 @@ export default function Settings() {
   const [testStatus, setTestStatus] = useState(null) // null | 'testing' | 'ok' | 'fail'
   const [testMsg, setTestMsg] = useState('')
   const [saved, setSaved] = useState(false)
+  // Server-side non-sensitive defaults (GET /api/config) — this instance is
+  // pre-configured so anyone can run scenarios; fields below are optional
+  // per-browser overrides on top of these.
+  const [serverConfig, setServerConfig] = useState(null)
+  useEffect(() => {
+    let alive = true
+    fetch('/api/config')
+      .then(r => (r.ok ? r.json() : null))
+      .then(cfg => { if (alive) setServerConfig(cfg) })
+      .catch(() => {})
+    return () => { alive = false }
+  }, [])
 
   function handleChange(key, value) {
     setSettings(prev => {
@@ -371,6 +383,20 @@ export default function Settings() {
         </div>
       </div>
 
+      {/* Pre-configured banner — this instance ships server-side defaults */}
+      {serverConfig?.domain && (
+        <div className="rounded-xl border border-orange-500/20 bg-orange-500/5 p-4 flex gap-3">
+          <Info className="w-5 h-5 text-orange-400 shrink-0 mt-0.5" />
+          <p className="text-sm text-slate-300 leading-relaxed">
+            <strong className="text-orange-400">This instance is pre-configured.</strong>{' '}
+            Scenarios target <span className="font-mono text-slate-200">{serverConfig.domain}</span> out of the box —
+            you don't need to fill anything in to run them. The non-sensitive fields below are
+            <strong className="text-slate-200"> optional per-browser overrides</strong> on top of the server defaults.
+            API tokens are never baked in and always stay in your browser.
+          </p>
+        </div>
+      )}
+
       {/* Privacy banner */}
       <div className="rounded-xl border border-green-500/20 bg-green-500/5 p-4 flex gap-3">
         <Shield className="w-5 h-5 text-green-400 shrink-0 mt-0.5" />
@@ -413,8 +439,10 @@ export default function Settings() {
             fieldKey="cf_domain"
             value={settings.cf_domain}
             onChange={handleChange}
-            placeholder="one-flare.com"
-            note="Target domain for attacks. Use one-flare.com — shop/portal/api.one-flare.com are Cloudflare-proxied with WAF + Bot Management + Logpush to S1. (us.sentinelone.cftenant.com has no shop/portal/api subdomains, so attacks won't resolve.)"
+            placeholder={serverConfig?.domain || 'your-domain.com'}
+            note={serverConfig?.domain
+              ? `Server default: ${serverConfig.domain} — shop/portal/api.${serverConfig.domain} are Cloudflare-proxied with WAF + Logpush to SentinelOne. Leave blank to use it; set a value only to point YOUR browser at a different domain.`
+              : 'Target domain for attacks. shop/portal/api.<domain> must be Cloudflare-proxied workers with WAF + Logpush configured.'}
           />
 
           <Field
