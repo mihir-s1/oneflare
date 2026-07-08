@@ -19,7 +19,7 @@
         "operator": "Greater"
       }
     },
-    "entityMappings": [
+    "_entityMappings_pending_feature": [
       {
         "columnName": "src_ip"
       },
