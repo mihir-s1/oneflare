@@ -413,8 +413,8 @@ export default function Settings() {
             fieldKey="cf_domain"
             value={settings.cf_domain}
             onChange={handleChange}
-            placeholder="acmecorp-lab.workers.dev"
-            note="Used to construct default target URLs. Example: acmecorp-lab.workers.dev"
+            placeholder="one-flare.com"
+            note="Target domain for attacks. Use one-flare.com — shop/portal/api.one-flare.com are Cloudflare-proxied with WAF + Bot Management + Logpush to S1. (us.sentinelone.cftenant.com has no shop/portal/api subdomains, so attacks won't resolve.)"
           />
 
           <Field
@@ -474,21 +474,21 @@ export default function Settings() {
             fieldKey="shop_url"
             value={settings.shop_url}
             onChange={handleChange}
-            placeholder={`https://shop.${settings.cf_domain || 'acmecorp-lab.workers.dev'}`}
+            placeholder={`https://shop.${settings.cf_domain || 'one-flare.com'}`}
           />
           <Field
             label="Portal URL"
             fieldKey="portal_url"
             value={settings.portal_url}
             onChange={handleChange}
-            placeholder={`https://portal.${settings.cf_domain || 'acmecorp-lab.workers.dev'}`}
+            placeholder={`https://portal.${settings.cf_domain || 'one-flare.com'}`}
           />
           <Field
             label="API URL"
             fieldKey="api_url"
             value={settings.api_url}
             onChange={handleChange}
-            placeholder={`https://api.${settings.cf_domain || 'acmecorp-lab.workers.dev'}`}
+            placeholder={`https://api.${settings.cf_domain || 'one-flare.com'}`}
           />
         </div>
       </Section>
