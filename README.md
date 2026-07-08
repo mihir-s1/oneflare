@@ -1,9 +1,31 @@
-# OneFlare — Cloudflare + SentinelOne detection lab
+<div align="center">
 
-Stand up a mock company ("NovaMind") across Cloudflare, generate realistic attack
-traffic from a web console, and see it flow end-to-end into SentinelOne detections and
-automated response. Built as a joint SentinelOne + Cloudflare demo you can replicate in
-**your own Cloudflare NFR + your own SentinelOne console**.
+<img src="docs/assets/logo.png" alt="OneFlare" width="150" />
+
+# OneFlare
+
+**Cloudflare + SentinelOne detection lab**
+
+Stand up a mock company across Cloudflare, generate realistic attack traffic from a web
+console, and watch it flow end-to-end into SentinelOne detections and automated response.
+
+[![Cloudflare](https://img.shields.io/badge/Cloudflare-F38020?style=for-the-badge&logo=cloudflare&logoColor=white)](https://cloudflare.com)
+[![SentinelOne](https://img.shields.io/badge/SentinelOne-A855F7?style=for-the-badge&logo=sentinelone&logoColor=white)](https://sentinelone.com)
+[![Docker](https://img.shields.io/badge/Docker-2D1B4E?style=for-the-badge&logo=docker&logoColor=white)](https://docker.com)
+
+![WAF](https://img.shields.io/badge/WAF-F38020?style=flat-square)
+![Access](https://img.shields.io/badge/Access-A855F7?style=flat-square)
+![Gateway](https://img.shields.io/badge/Gateway-3B82F6?style=flat-square)
+![Workers](https://img.shields.io/badge/Workers-EF4444?style=flat-square)
+![OCSF](https://img.shields.io/badge/OCSF-1A0A2E?style=flat-square)
+![Scenarios](https://img.shields.io/badge/scenarios-8-F38020?style=flat-square)
+
+</div>
+
+---
+
+Built as a joint SentinelOne + Cloudflare demo you can replicate in **your own Cloudflare
+NFR + your own SentinelOne console**.
 
 ```
 Attack console (this repo)  ──▶  Cloudflare (WAF · Bot · Gateway · Access · Workers)
@@ -22,7 +44,7 @@ Attack console (this repo)  ──▶  Cloudflare (WAF · Bot · Gateway · Acce
 
 ---
 
-## What gets deployed
+## 📦 What gets deployed
 
 Three linked Cloudflare Workers forming the mock company, plus the attack console:
 
@@ -38,7 +60,7 @@ Eight scenarios (`sqli`, `xss`, `traversal`, `cred`, `dns`, `exfil`, `bot`, `pro
 
 ---
 
-## Prerequisites
+## ✅ Prerequisites
 
 | Need | Notes |
 |---|---|
@@ -50,7 +72,7 @@ Eight scenarios (`sqli`, `xss`, `traversal`, `cred`, `dns`, `exfil`, `bot`, `pro
 
 ---
 
-## Setup — five steps
+## 🚀 Setup — five steps
 
 ### Step 1 — Configure `.env.local`
 ```bash
@@ -136,7 +158,7 @@ landed in your SDL (PowerQuery over `class_uid` 4002/4003, `dataSource.name='Clo
 
 ---
 
-## Docs map (for humans and AI agents)
+## 🗺️ Docs map (for humans and AI agents)
 
 | Path | What it covers |
 |---|---|
@@ -153,7 +175,7 @@ landed in your SDL (PowerQuery over `class_uid` 4002/4003, `dataSource.name='Clo
 
 ---
 
-## Repository structure
+## 🧭 Repository structure
 ```
 oneflare/
 ├── README.md · ARCHITECTURE.md · .env.example
@@ -167,7 +189,7 @@ oneflare/
 └── docs/             story-map · infrastructure · s1 action reference
 ```
 
-## Security notes
+## 🔒 Security notes
 - Workers contain **intentional** vulnerabilities (reflected XSS, open export endpoint,
   mock chat) for WAF/detection testing. Deploy only to a lab/NFR account.
 - No secrets are committed. `.env.local` is gitignored; the console never bakes tokens
