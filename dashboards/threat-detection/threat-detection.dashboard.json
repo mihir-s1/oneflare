@@ -1,0 +1,614 @@
+{
+  "configType": "TABBED",
+  "duration": "24h",
+  "description": "OneFlare \u2014 Cloudflare Threat Detection. WAF web attacks, credential attacks, DNS/C2 tunneling, and data exfil / bot / AI threats, from Cloudflare Logpush parsed to OCSF in the SDL.",
+  "tabs": [
+    {
+      "tabName": "Threat Overview",
+      "graphs": [
+        {
+          "graphStyle": "markdown",
+          "title": "OneFlare \u2014 Cloudflare Threat Detection",
+          "markdown": "Live view of the NovaMind attack surface on Cloudflare, parsed to OCSF in the SDL. **Attacks** are derived from Cloudflare's WAF ML attack scores (1-99, **lower = more malicious**) and Firewall-event blocks. Tabs drill into each scenario: web-app (WAF), credential, DNS/C2, and exfil/bot/AI. Zero rows = nothing in the window; widen the time picker.",
+          "layout": {
+            "w": 60,
+            "h": 4,
+            "x": 0,
+            "y": 0
+          }
+        },
+        {
+          "graphStyle": "number",
+          "title": "HTTP Requests",
+          "query": "class_uid = 4002 dataSource.cloudflare_dataset = 'HTTP Requests'\n| group c=count()\n| limit 1",
+          "layout": {
+            "w": 10,
+            "h": 8,
+            "x": 0,
+            "y": 4
+          },
+          "options": {
+            "format": "commas"
+          },
+          "sparklineConfig": {
+            "enabled": true
+          }
+        },
+        {
+          "graphStyle": "number",
+          "title": "WAF Blocks",
+          "query": "class_uid = 4002 dataSource.cloudflare_dataset = 'Firewall events'\n| group c=count()\n| limit 1",
+          "layout": {
+            "w": 10,
+            "h": 8,
+            "x": 10,
+            "y": 4
+          },
+          "options": {
+            "format": "commas",
+            "color": "#f38020"
+          }
+        },
+        {
+          "graphStyle": "number",
+          "title": "Likely Web Attacks",
+          "query": "class_uid = 4002 dataSource.cloudflare_dataset = 'HTTP Requests'\n| let sqli=number(unmapped.WAFSQLiAttackScore), xss=number(unmapped.WAFXSSAttackScore), rce=number(unmapped.WAFRCEAttackScore)\n| filter (sqli>=1 and sqli<=20) or (xss>=1 and xss<=20) or (rce>=1 and rce<=20)\n| group c=count()\n| limit 1",
+          "layout": {
+            "w": 10,
+            "h": 8,
+            "x": 20,
+            "y": 4
+          },
+          "options": {
+            "format": "commas",
+            "color": "#E0483C"
+          }
+        },
+        {
+          "graphStyle": "number",
+          "title": "Attacker IPs",
+          "query": "class_uid = 4002 dataSource.cloudflare_dataset = 'HTTP Requests'\n| let sqli=number(unmapped.WAFSQLiAttackScore), xss=number(unmapped.WAFXSSAttackScore), rce=number(unmapped.WAFRCEAttackScore)\n| filter (sqli>=1 and sqli<=20) or (xss>=1 and xss<=20) or (rce>=1 and rce<=20)\n| group c=estimate_distinct(src_endpoint.ip)\n| limit 1",
+          "layout": {
+            "w": 10,
+            "h": 8,
+            "x": 30,
+            "y": 4
+          },
+          "options": {
+            "color": "#E0483C"
+          }
+        },
+        {
+          "graphStyle": "number",
+          "title": "Gateway DNS Queries",
+          "query": "class_uid = 4003 dataSource.cloudflare_dataset = 'Gateway DNS'\n| group c=count()\n| limit 1",
+          "layout": {
+            "w": 10,
+            "h": 8,
+            "x": 40,
+            "y": 4
+          },
+          "options": {
+            "format": "commas",
+            "color": "#a855f7"
+          }
+        },
+        {
+          "graphStyle": "number",
+          "title": "Countries Seen",
+          "query": "class_uid = 4002 dataSource.cloudflare_dataset = 'HTTP Requests'\n| group c=estimate_distinct(src_endpoint.location.country)\n| limit 1",
+          "layout": {
+            "w": 10,
+            "h": 8,
+            "x": 50,
+            "y": 4
+          }
+        },
+        {
+          "graphStyle": "stacked_bar",
+          "title": "HTTP Requests Over Time by Response Class",
+          "query": "class_uid = 4002 dataSource.cloudflare_dataset = 'HTTP Requests'\n| let code=number(unmapped.EdgeResponseStatus)\n| let cls = code>=500 ? '5xx Server Error' : code>=400 ? '4xx Client Error / Blocked' : code>=300 ? '3xx Redirect' : '2xx OK'\n| group c=count() by cls, timestamp=timebucket('1h')\n| transpose cls on timestamp",
+          "layout": {
+            "w": 60,
+            "h": 14,
+            "x": 0,
+            "y": 12
+          },
+          "xAxis": "time"
+        },
+        {
+          "graphStyle": "donut",
+          "title": "Attack Types (WAF ML score \u2264 20)",
+          "query": "| union\n(\nclass_uid = 4002 dataSource.cloudflare_dataset = 'HTTP Requests'\n| let s=number(unmapped.WAFSQLiAttackScore)\n| filter s>=1 and s<=20\n| group Count=count() by Type='SQL Injection'\n),\n(\nclass_uid = 4002 dataSource.cloudflare_dataset = 'HTTP Requests'\n| let s=number(unmapped.WAFXSSAttackScore)\n| filter s>=1 and s<=20\n| group Count=count() by Type='XSS'\n),\n(\nclass_uid = 4002 dataSource.cloudflare_dataset = 'HTTP Requests'\n| let s=number(unmapped.WAFRCEAttackScore)\n| filter s>=1 and s<=20\n| group Count=count() by Type='Traversal / RCE'\n)\n| columns Type, Count",
+          "layout": {
+            "w": 20,
+            "h": 14,
+            "x": 0,
+            "y": 26
+          },
+          "totalNumberConfig": {
+            "enabled": true
+          },
+          "dataLabelType": "VALUE"
+        },
+        {
+          "graphStyle": "stacked_bar",
+          "title": "Top Source Countries",
+          "query": "class_uid = 4002 dataSource.cloudflare_dataset = 'HTTP Requests'\n| group c=count() by country=src_endpoint.location.country\n| filter c>0\n| sort -c\n| limit 15",
+          "layout": {
+            "w": 20,
+            "h": 14,
+            "x": 20,
+            "y": 26
+          },
+          "xAxis": "grouped_data"
+        },
+        {
+          "graphStyle": "",
+          "title": "Top Attacker IPs",
+          "query": "class_uid = 4002 dataSource.cloudflare_dataset = 'HTTP Requests'\n| let sqli=number(unmapped.WAFSQLiAttackScore), xss=number(unmapped.WAFXSSAttackScore), rce=number(unmapped.WAFRCEAttackScore)\n| filter (sqli>=1 and sqli<=20) or (xss>=1 and xss<=20) or (rce>=1 and rce<=20)\n| let worst = (sqli>=1 and sqli<=20) ? sqli : (xss>=1 and xss<=20) ? xss : rce\n| group hits=count(), lowest_score=min(worst) by ip=src_endpoint.ip, country=src_endpoint.location.country\n| sort -hits\n| limit 20\n| columns \"Attacker IP\"=ip, \"Country\"=country, \"Attack Requests\"=hits, \"Lowest WAF Score\"=lowest_score",
+          "layout": {
+            "w": 20,
+            "h": 14,
+            "x": 40,
+            "y": 26
+          },
+          "showBarsColumn": "true"
+        },
+        {
+          "graphStyle": "",
+          "title": "WAF Blocks (Firewall Events)",
+          "query": "class_uid = 4002 dataSource.cloudflare_dataset = 'Firewall events'\n| group hits=count() by host=http_request.url.hostname, act=action, ua=http_request.user_agent, ip=src_endpoint.ip, country=src_endpoint.location.country\n| sort -hits\n| limit 25\n| columns \"Target Host\"=host, \"Action\"=act, \"User Agent\"=ua, \"Source IP\"=ip, \"Country\"=country, \"Blocks\"=hits",
+          "layout": {
+            "w": 60,
+            "h": 16,
+            "x": 0,
+            "y": 40
+          },
+          "showBarsColumn": "true"
+        }
+      ]
+    },
+    {
+      "tabName": "Web App Attacks (WAF)",
+      "graphs": [
+        {
+          "graphStyle": "markdown",
+          "title": "Web Application Attacks \u2014 Cloudflare WAF ML scores",
+          "markdown": "Every request carries Cloudflare's per-attack ML score (1-99). We flag **score \u2264 20** (near-certain attack). SQLi/XSS use their dedicated scores; path-traversal/LFI is caught by the RCE score **plus** raw-URI patterns. Scores are emitted on 200s too \u2014 this catches attacks that slipped past the managed ruleset, not just blocked hits.",
+          "layout": {
+            "w": 60,
+            "h": 4,
+            "x": 0,
+            "y": 0
+          }
+        },
+        {
+          "graphStyle": "number",
+          "title": "SQLi Requests",
+          "query": "class_uid = 4002 dataSource.cloudflare_dataset = 'HTTP Requests'\n| let s=number(unmapped.WAFSQLiAttackScore)\n| filter s>=1 and s<=20\n| group c=count()\n| limit 1",
+          "layout": {
+            "w": 15,
+            "h": 8,
+            "x": 0,
+            "y": 4
+          },
+          "options": {
+            "color": "#E0483C"
+          }
+        },
+        {
+          "graphStyle": "number",
+          "title": "XSS Requests",
+          "query": "class_uid = 4002 dataSource.cloudflare_dataset = 'HTTP Requests'\n| let s=number(unmapped.WAFXSSAttackScore)\n| filter s>=1 and s<=20\n| group c=count()\n| limit 1",
+          "layout": {
+            "w": 15,
+            "h": 8,
+            "x": 15,
+            "y": 4
+          },
+          "options": {
+            "color": "#f38020"
+          }
+        },
+        {
+          "graphStyle": "number",
+          "title": "Traversal / RCE",
+          "query": "class_uid = 4002 dataSource.cloudflare_dataset = 'HTTP Requests'\n| let s=number(unmapped.WAFRCEAttackScore)\n| filter s>=1 and s<=20\n| group c=count()\n| limit 1",
+          "layout": {
+            "w": 15,
+            "h": 8,
+            "x": 30,
+            "y": 4
+          },
+          "options": {
+            "color": "#a855f7"
+          }
+        },
+        {
+          "graphStyle": "number",
+          "title": "Attacked Hosts",
+          "query": "class_uid = 4002 dataSource.cloudflare_dataset = 'HTTP Requests'\n| let sqli=number(unmapped.WAFSQLiAttackScore), xss=number(unmapped.WAFXSSAttackScore), rce=number(unmapped.WAFRCEAttackScore)\n| filter (sqli>=1 and sqli<=20) or (xss>=1 and xss<=20) or (rce>=1 and rce<=20)\n| group c=estimate_distinct(http_request.url.hostname)\n| limit 1",
+          "layout": {
+            "w": 15,
+            "h": 8,
+            "x": 45,
+            "y": 4
+          }
+        },
+        {
+          "graphStyle": "",
+          "title": "SQL Injection \u2014 lowest-scoring requests",
+          "query": "class_uid = 4002 dataSource.cloudflare_dataset = 'HTTP Requests'\n| let s=number(unmapped.WAFSQLiAttackScore)\n| filter s>=1 and s<=20\n| group hits=count(), worst=min(s) by uri=http_request.url.url_string, ip=src_endpoint.ip, country=src_endpoint.location.country\n| sort worst\n| limit 25\n| columns \"Request URI\"=uri, \"Source IP\"=ip, \"Country\"=country, \"Requests\"=hits, \"WAF Score (lower=worse)\"=worst",
+          "layout": {
+            "w": 60,
+            "h": 13,
+            "x": 0,
+            "y": 12
+          },
+          "showBarsColumn": "true"
+        },
+        {
+          "graphStyle": "",
+          "title": "Cross-Site Scripting (XSS) \u2014 lowest-scoring requests",
+          "query": "class_uid = 4002 dataSource.cloudflare_dataset = 'HTTP Requests'\n| let s=number(unmapped.WAFXSSAttackScore)\n| filter s>=1 and s<=20\n| group hits=count(), worst=min(s) by uri=http_request.url.url_string, ip=src_endpoint.ip, country=src_endpoint.location.country\n| sort worst\n| limit 25\n| columns \"Request URI\"=uri, \"Source IP\"=ip, \"Country\"=country, \"Requests\"=hits, \"WAF Score (lower=worse)\"=worst",
+          "layout": {
+            "w": 60,
+            "h": 13,
+            "x": 0,
+            "y": 25
+          },
+          "showBarsColumn": "true"
+        },
+        {
+          "graphStyle": "",
+          "title": "Path Traversal / LFI (RCE score \u2264 20 OR raw-URI pattern)",
+          "query": "class_uid = 4002 dataSource.cloudflare_dataset = 'HTTP Requests'\n| let s=number(unmapped.WAFRCEAttackScore)\n| filter (s>=1 and s<=20) or http_request.url.url_string contains:anycase(\"/etc/passwd\") or http_request.url.url_string contains:anycase(\"../\") or http_request.url.url_string contains:anycase(\"%2e%2e\")\n| group hits=count() by uri=http_request.url.url_string, ip=src_endpoint.ip, country=src_endpoint.location.country\n| sort -hits\n| limit 25\n| columns \"Request URI\"=uri, \"Source IP\"=ip, \"Country\"=country, \"Requests\"=hits",
+          "layout": {
+            "w": 30,
+            "h": 14,
+            "x": 0,
+            "y": 38
+          },
+          "showBarsColumn": "true"
+        },
+        {
+          "graphStyle": "donut",
+          "title": "Attacks by Target Host",
+          "query": "class_uid = 4002 dataSource.cloudflare_dataset = 'HTTP Requests'\n| let sqli=number(unmapped.WAFSQLiAttackScore), xss=number(unmapped.WAFXSSAttackScore), rce=number(unmapped.WAFRCEAttackScore)\n| filter (sqli>=1 and sqli<=20) or (xss>=1 and xss<=20) or (rce>=1 and rce<=20)\n| group c=count() by host=http_request.url.hostname\n| filter c>0\n| columns host, c",
+          "layout": {
+            "w": 30,
+            "h": 14,
+            "x": 30,
+            "y": 38
+          },
+          "totalNumberConfig": {
+            "enabled": true
+          }
+        }
+      ]
+    },
+    {
+      "tabName": "Credential Attacks",
+      "graphs": [
+        {
+          "graphStyle": "markdown",
+          "title": "Credential Attacks \u2014 portal & shop login",
+          "markdown": "Credential stuffing and brute force against `/login` on portal.* and shop.*. Failed logins surface as **401 / 403 / 429** edge responses. A single source IP with many failures across many usernames = stuffing; many passwords against one account = brute force.",
+          "layout": {
+            "w": 60,
+            "h": 4,
+            "x": 0,
+            "y": 0
+          }
+        },
+        {
+          "graphStyle": "number",
+          "title": "Login Attempts",
+          "query": "class_uid = 4002 dataSource.cloudflare_dataset = 'HTTP Requests'\n| filter http_request.url.url_string contains:anycase(\"/login\")\n| group c=count()\n| limit 1",
+          "layout": {
+            "w": 15,
+            "h": 8,
+            "x": 0,
+            "y": 4
+          },
+          "options": {
+            "format": "commas"
+          }
+        },
+        {
+          "graphStyle": "number",
+          "title": "Failed Logins",
+          "query": "class_uid = 4002 dataSource.cloudflare_dataset = 'HTTP Requests'\n| filter http_request.url.url_string contains:anycase(\"/login\")\n| filter unmapped.EdgeResponseStatus in ('401','403','429')\n| group c=count()\n| limit 1",
+          "layout": {
+            "w": 15,
+            "h": 8,
+            "x": 15,
+            "y": 4
+          },
+          "options": {
+            "color": "#E0483C"
+          }
+        },
+        {
+          "graphStyle": "number",
+          "title": "Source IPs",
+          "query": "class_uid = 4002 dataSource.cloudflare_dataset = 'HTTP Requests'\n| filter http_request.url.url_string contains:anycase(\"/login\")\n| group c=estimate_distinct(src_endpoint.ip)\n| limit 1",
+          "layout": {
+            "w": 15,
+            "h": 8,
+            "x": 30,
+            "y": 4
+          }
+        },
+        {
+          "graphStyle": "number",
+          "title": "Targeted Hosts",
+          "query": "class_uid = 4002 dataSource.cloudflare_dataset = 'HTTP Requests'\n| filter http_request.url.url_string contains:anycase(\"/login\")\n| group c=estimate_distinct(http_request.url.hostname)\n| limit 1",
+          "layout": {
+            "w": 15,
+            "h": 8,
+            "x": 45,
+            "y": 4
+          }
+        },
+        {
+          "graphStyle": "stacked_bar",
+          "title": "Login Attempts Over Time by Response Status",
+          "query": "class_uid = 4002 dataSource.cloudflare_dataset = 'HTTP Requests'\n| filter http_request.url.url_string contains:anycase(\"/login\")\n| group c=count() by status=unmapped.EdgeResponseStatus, timestamp=timebucket('30m')\n| transpose status on timestamp",
+          "layout": {
+            "w": 40,
+            "h": 14,
+            "x": 0,
+            "y": 12
+          },
+          "xAxis": "time"
+        },
+        {
+          "graphStyle": "donut",
+          "title": "Login Response Status",
+          "query": "class_uid = 4002 dataSource.cloudflare_dataset = 'HTTP Requests'\n| filter http_request.url.url_string contains:anycase(\"/login\")\n| group c=count() by status=unmapped.EdgeResponseStatus\n| filter c>0\n| columns status, c",
+          "layout": {
+            "w": 20,
+            "h": 14,
+            "x": 40,
+            "y": 12
+          },
+          "totalNumberConfig": {
+            "enabled": true
+          },
+          "dataLabelType": "VALUE"
+        },
+        {
+          "graphStyle": "",
+          "title": "Failed Logins by Source IP",
+          "query": "class_uid = 4002 dataSource.cloudflare_dataset = 'HTTP Requests'\n| filter http_request.url.url_string contains:anycase(\"/login\")\n| filter unmapped.EdgeResponseStatus in ('401','403','429')\n| group failures=count() by ip=src_endpoint.ip, host=http_request.url.hostname, country=src_endpoint.location.country\n| sort -failures\n| limit 25\n| columns \"Source IP\"=ip, \"Target Host\"=host, \"Country\"=country, \"Failed Logins\"=failures",
+          "layout": {
+            "w": 60,
+            "h": 14,
+            "x": 0,
+            "y": 26
+          },
+          "showBarsColumn": "true"
+        }
+      ]
+    },
+    {
+      "tabName": "DNS & C2 (Gateway)",
+      "graphs": [
+        {
+          "graphStyle": "markdown",
+          "title": "DNS Tunneling / C2 Beaconing \u2014 Cloudflare Gateway DNS",
+          "markdown": "Gateway DNS resolver logs. DNS tunneling / DGA is distinguished by **randomness and long leftmost labels**, not by volume alone. The suspicious-label table flags query names whose leftmost label exceeds 25 chars (data-in-DNS exfil / dnscat2-style tunneling).",
+          "layout": {
+            "w": 60,
+            "h": 4,
+            "x": 0,
+            "y": 0
+          }
+        },
+        {
+          "graphStyle": "number",
+          "title": "DNS Queries",
+          "query": "class_uid = 4003 dataSource.cloudflare_dataset = 'Gateway DNS'\n| group c=count()\n| limit 1",
+          "layout": {
+            "w": 20,
+            "h": 8,
+            "x": 0,
+            "y": 4
+          },
+          "options": {
+            "format": "commas",
+            "color": "#a855f7"
+          }
+        },
+        {
+          "graphStyle": "number",
+          "title": "Distinct Domains",
+          "query": "class_uid = 4003 dataSource.cloudflare_dataset = 'Gateway DNS'\n| group c=estimate_distinct(unmapped.QueryName)\n| limit 1",
+          "layout": {
+            "w": 20,
+            "h": 8,
+            "x": 20,
+            "y": 4
+          },
+          "options": {
+            "format": "commas"
+          }
+        },
+        {
+          "graphStyle": "number",
+          "title": "Long-Label Queries (>25)",
+          "query": "class_uid = 4003 dataSource.cloudflare_dataset = 'Gateway DNS'\n| let label = replace(unmapped.QueryName, '[.].*', '')\n| filter len(label) > 25\n| group c=count()\n| limit 1",
+          "layout": {
+            "w": 20,
+            "h": 8,
+            "x": 40,
+            "y": 4
+          },
+          "options": {
+            "color": "#E0483C"
+          }
+        },
+        {
+          "graphStyle": "line",
+          "title": "DNS Query Volume Over Time",
+          "query": "class_uid = 4003 dataSource.cloudflare_dataset = 'Gateway DNS'\n| group c=count() by timestamp=timebucket('1h')",
+          "layout": {
+            "w": 40,
+            "h": 14,
+            "x": 0,
+            "y": 12
+          }
+        },
+        {
+          "graphStyle": "donut",
+          "title": "Query Type",
+          "query": "class_uid = 4003 dataSource.cloudflare_dataset = 'Gateway DNS'\n| group c=count() by qtype=query.type\n| filter c>0\n| columns qtype, c",
+          "layout": {
+            "w": 20,
+            "h": 14,
+            "x": 40,
+            "y": 12
+          },
+          "totalNumberConfig": {
+            "enabled": true
+          },
+          "dataLabelType": "VALUE"
+        },
+        {
+          "graphStyle": "",
+          "title": "Suspicious Long-Label Queries (tunneling / DGA)",
+          "query": "class_uid = 4003 dataSource.cloudflare_dataset = 'Gateway DNS'\n| let fqdn=unmapped.QueryName\n| let label = replace(fqdn, '[.].*', '')\n| let label_len = len(label)\n| filter label_len > 25\n| group queries=count(), max_label=max(label_len) by domain=fqdn, src=src_endpoint.ip\n| sort -max_label\n| limit 25\n| columns \"Query Name\"=domain, \"Source IP\"=src, \"Leftmost Label Len\"=max_label, \"Queries\"=queries",
+          "layout": {
+            "w": 30,
+            "h": 14,
+            "x": 0,
+            "y": 26
+          },
+          "showBarsColumn": "true"
+        },
+        {
+          "graphStyle": "",
+          "title": "Top Queried Domains",
+          "query": "class_uid = 4003 dataSource.cloudflare_dataset = 'Gateway DNS'\n| group queries=count() by domain=unmapped.QueryName\n| sort -queries\n| limit 20\n| columns \"Domain\"=domain, \"Queries\"=queries",
+          "layout": {
+            "w": 30,
+            "h": 14,
+            "x": 30,
+            "y": 26
+          },
+          "showBarsColumn": "true"
+        }
+      ]
+    },
+    {
+      "tabName": "Exfil, Bots & AI",
+      "graphs": [
+        {
+          "graphStyle": "markdown",
+          "title": "Data Exfiltration, Bots & AI Threats \u2014 the API surface (api.*)",
+          "markdown": "Bulk data exfil via `/export`, API enumeration, polymorphic AI-bot scraping, and prompt injection on the Pyxis `/api/v1/chat` endpoint. The bot tell is **one source cycling many User-Agents**: a single automated client rotating its UA to look like many browsers/SDKs, while its real client identity (source IP) stays constant.",
+          "layout": {
+            "w": 60,
+            "h": 4,
+            "x": 0,
+            "y": 0
+          }
+        },
+        {
+          "graphStyle": "number",
+          "title": "Export Requests",
+          "query": "class_uid = 4002 dataSource.cloudflare_dataset = 'HTTP Requests'\n| filter http_request.url.url_string contains:anycase(\"/export\")\n| group c=count()\n| limit 1",
+          "layout": {
+            "w": 15,
+            "h": 8,
+            "x": 0,
+            "y": 4
+          },
+          "options": {
+            "color": "#E0483C"
+          }
+        },
+        {
+          "graphStyle": "number",
+          "title": "Max Export Bytes",
+          "query": "class_uid = 4002 dataSource.cloudflare_dataset = 'HTTP Requests'\n| filter http_request.url.url_string contains:anycase(\"/export\")\n| group c=max(number(unmapped.EdgeResponseBytes))\n| limit 1",
+          "layout": {
+            "w": 15,
+            "h": 8,
+            "x": 15,
+            "y": 4
+          },
+          "options": {
+            "format": "bytes"
+          }
+        },
+        {
+          "graphStyle": "number",
+          "title": "API Requests",
+          "query": "class_uid = 4002 dataSource.cloudflare_dataset = 'HTTP Requests'\n| filter http_request.url.url_string contains:anycase(\"/api/v1/\")\n| group c=count()\n| limit 1",
+          "layout": {
+            "w": 15,
+            "h": 8,
+            "x": 30,
+            "y": 4
+          },
+          "options": {
+            "format": "commas"
+          }
+        },
+        {
+          "graphStyle": "number",
+          "title": "Prompt-Injection POSTs",
+          "query": "class_uid = 4002 dataSource.cloudflare_dataset = 'HTTP Requests'\n| filter http_request.url.url_string contains:anycase(\"/chat\")\n| filter http_request.http_method = 'POST'\n| group c=count()\n| limit 1",
+          "layout": {
+            "w": 15,
+            "h": 8,
+            "x": 45,
+            "y": 4
+          },
+          "options": {
+            "color": "#a855f7"
+          }
+        },
+        {
+          "graphStyle": "",
+          "title": "Top API Data Pulls (by response size)",
+          "query": "class_uid = 4002 dataSource.cloudflare_dataset = 'HTTP Requests'\n| filter http_request.url.url_string contains:anycase(\"/api/v1/\")\n| group hits=count(), max_bytes=max(number(unmapped.EdgeResponseBytes)) by uri=http_request.url.url_string, ip=src_endpoint.ip\n| sort -max_bytes\n| limit 25\n| columns \"API Endpoint\"=uri, \"Source IP\"=ip, \"Requests\"=hits, \"Max Response Bytes\"=max_bytes",
+          "layout": {
+            "w": 30,
+            "h": 14,
+            "x": 0,
+            "y": 12
+          },
+          "showBarsColumn": "true"
+        },
+        {
+          "graphStyle": "",
+          "title": "Polymorphic Bot Tell \u2014 one source, many User-Agents",
+          "query": "class_uid = 4002 dataSource.cloudflare_dataset = 'HTTP Requests'\n| group requests=count(), distinct_uas=estimate_distinct(http_request.user_agent) by ip=src_endpoint.ip, country=src_endpoint.location.country\n| filter distinct_uas > 1\n| sort -distinct_uas\n| limit 20\n| columns \"Source IP\"=ip, \"Country\"=country, \"Distinct User-Agents\"=distinct_uas, \"Requests\"=requests",
+          "layout": {
+            "w": 30,
+            "h": 14,
+            "x": 30,
+            "y": 12
+          },
+          "showBarsColumn": "true"
+        },
+        {
+          "graphStyle": "",
+          "title": "Top User-Agents",
+          "query": "class_uid = 4002 dataSource.cloudflare_dataset = 'HTTP Requests'\n| group requests=count(), distinct_ips=estimate_distinct(src_endpoint.ip) by ua=http_request.user_agent\n| sort -requests\n| limit 20\n| columns \"User Agent\"=ua, \"Requests\"=requests, \"Distinct IPs\"=distinct_ips",
+          "layout": {
+            "w": 60,
+            "h": 14,
+            "x": 0,
+            "y": 26
+          },
+          "showBarsColumn": "true"
+        }
+      ]
+    }
+  ]
+}

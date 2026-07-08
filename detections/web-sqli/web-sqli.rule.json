@@ -1,0 +1,39 @@
+{
+  "data": {
+    "name": "CF-WAF-SQLi \u2014 SQL Injection against shop.novamind.ai (WAF ML score)",
+    "description": "Detects SQL-injection attempts on the NovaMind webstore using Cloudflare's WAF machine-learning SQLi attack score (unmapped.WAFSQLiAttackScore, class_uid 4002, 'HTTP Requests'). The score runs 1-99 where LOWER is more malicious and is NULL on benign traffic; we cast with number() and fire only when the score is present AND in the high-confidence malicious band 1-20. Groups by src_ip + host + country and emits one alert per attacking source, carrying the request count, the single lowest (most-malicious) score, and the worst offending URI (max_by on inverted score). Low false-positive because it keys on Cloudflare's trained ML verdict rather than a static signature, and it ignores the benign 21-99 band and unscored requests entirely. Threshold is any qualifying request (rule threshold >0) since a single confirmed SQLi probe on a public store is actionable. MITRE ATT&CK T1190 (Exploit Public-Facing Application). Covers OneFlare scenario 01.",
+    "queryType": "scheduled",
+    "queryLang": "2.0",
+    "severity": "High",
+    "status": "Active",
+    "expirationMode": "Permanent",
+    "treatAsThreat": "UNDEFINED",
+    "networkQuarantine": false,
+    "s1ql": "",
+    "scheduledParams": {
+      "query": "class_uid=4002 dataSource.cloudflare_dataset='HTTP Requests' unmapped.WAFSQLiAttackScore=*\n| let src_ip     = src_endpoint.ip\n| let host       = http_request.url.hostname\n| let country    = src_endpoint.location.country\n| let sqli_score = number(unmapped.WAFSQLiAttackScore)\n| let malice     = 100 - sqli_score\n| filter sqli_score >= 1 AND sqli_score <= 20\n| group\n    attack_requests = count(),\n    lowest_score    = min(sqli_score),\n    sample_uri      = max_by(http_request.url.url_string, malice),\n    sample_ua       = any(http_request.user_agent),\n    first_seen      = oldest(timestamp),\n    last_seen       = newest(timestamp)\n  by src_ip, host, country\n| let detection_time = simpledateformat(last_seen, 'yyyy-MM-dd HH:mm:ss z')\n| sort -attack_requests\n| columns detection_time, src_ip, host, country, attack_requests, lowest_score, sample_uri, sample_ua, first_seen\n| limit 100",
+      "runIntervalMinutes": 1,
+      "lookbackWindowMinutes": 5,
+      "threshold": {
+        "value": 0,
+        "operator": "Greater"
+      }
+    },
+    "_entityMappings_pending_feature": [
+      {
+        "columnName": "src_ip"
+      },
+      {
+        "columnName": "host"
+      },
+      {
+        "columnName": "country"
+      }
+    ]
+  },
+  "filter": {
+    "siteIds": [
+      "<YOUR_S1_SITE_ID>"
+    ]
+  }
+}
