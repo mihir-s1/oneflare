@@ -87,6 +87,48 @@ DNS tunneling scenario + campaigns: KEEP UNTOUCHED (per user).
 Key facts: one-flare zone id e5ccbf98fa13d1ce5de36d999ddf6720; account b8e637d5097fff0c694c3290ba81563e;
 S1 site OneFlare id 2433185103040607397. Only Gateway HTTP/DNS + ZT + Audit flow to S1 today.
 
+## Config persistence + public partner repo (2026-07-08)
+
+### Part A — non-sensitive config persists server-side [DONE + LIVE]
+- [x] Backend `SERVER_CONFIG` (env-driven, baked fallback one-flare.com) + `GET /api/config`
+      + `/ws/run` falls back to it. lab-ui/backend/main.py. Verified live:
+      `curl https://one-flare.com/api/config` returns baked domain/urls/delay/jitter, no secrets.
+- [x] Frontend fetches /api/config; isConfigured now true from server domain → a FRESH
+      browser (no localStorage) can run scenarios. Settings shows a "pre-configured" banner.
+      ScenarioDetail.jsx + Settings.jsx.
+- [x] Fixed dead paths: config.py honors *_URL_OVERRIDE (+ novamind-* workers.dev names);
+      utils.jitter() reads ATTACK_DELAY/ATTACK_JITTER (UI timing knobs now work).
+- [x] DEPLOYED to one-flare (wrangler, container ccb916bc). GOTCHA: `set -a; source
+      ../.env.local` does NOT export CLOUDFLARE_API_TOKEN (spaces around `=` in the file) →
+      wrangler failed "non-interactive ... CLOUDFLARE_API_TOKEN". Fix: read creds via python
+      command-substitution into env vars, then `npx wrangler@4.77.0 deploy`.
+
+### Part B — public partner repo [PUBLISHED]
+- [x] amin-hamidi-s1/oneflare is PUBLIC: https://github.com/amin-hamidi-s1/oneflare
+      Built from a sanitized fresh-history snapshot (git archive HEAD minus internal paths →
+      git init → single commit). 102 files. Verified: no account/zone IDs; only intentional
+      forged-JWT attack payloads in campaigns/saas.py; internal paths excluded.
+- [x] Excluded from public: reference/ (AGPL), .claude/, tasks/, .mcp.json, CLAUDE.md
+      (also added to the public .gitignore to prevent future accidental commits).
+- [x] Genericized: setup.sh Access email domain → ACCESS_EMAIL_DOMAIN; .env.example expanded
+      (all vars, sensitive vs non-sensitive); README rewritten as 5-step self-setup guide
+      (KV create + Logpush→S1 + OCSF parser steps added, docs map, clone URL); wrangler.jsonc
+      route comment. Kept NovaMind branding; one-flare.com kept as reference-instance default.
+- [ ] BLOCKED (needs user MFA): CI workflow .github/workflows/deploy.yml was DROPPED from the
+      public repo — the amin-hamidi-s1 token lacks the `workflow` OAuth scope (push rejected).
+      To restore CI: `gh auth refresh --user amin-hamidi-s1 --scopes workflow` (interactive/MFA),
+      then re-add deploy.yml. Optional — partners use setup.sh + docker.
+
+### Part C — deploy/update workflow [ESTABLISHED]
+- Cloudflare Containers do NOT auto-pull from GitHub — backend is built by `wrangler deploy`
+  from local source. Standing rule: every change → commit + (publish sanitized snapshot to
+  public repo) + `wrangler deploy` to one-flare.
+- REPO MODEL (user didn't answer the follow-up; chose recommended): public repo is the
+  canonical shareable artifact; working dir stays private (aminhamidi-s1) WITH internal
+  tooling and cannot push directly to public (would leak reference//.claude//tasks). Sync to
+  public = re-run the sanitized snapshot export. OPEN: confirm whether to fully switch the
+  primary dev remote or keep this private-dev + public-mirror split.
+
 ## Scenario repoint fixes (2026-07-08)
 - [x] #1 Cred stuffing repointed to one-flare.com. Root cause: `.env.local` had
       `CLOUDFLARE_DOMAIN = us.sentinelone.cftenant.com` (that host has no shop/portal
