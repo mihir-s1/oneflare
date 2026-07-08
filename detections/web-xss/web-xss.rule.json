@@ -1,0 +1,39 @@
+{
+  "data": {
+    "name": "CF-WAF-XSS \u2014 Cross-Site Scripting against shop.novamind.ai (WAF ML score)",
+    "description": "Detects reflected/stored XSS attempts on the NovaMind webstore (e.g. product-review forms and search) using Cloudflare's WAF machine-learning XSS attack score (unmapped.WAFXSSAttackScore, class_uid 4002, 'HTTP Requests'). Score is 1-99 where LOWER is more malicious and NULL on benign; we cast with number(), require the score to be present, and fire only in the high-confidence malicious band 1-20. Groups by src_ip + host + country, one alert per attacking source, carrying request count, lowest (worst) score, and the most-malicious URI via max_by on inverted score. Low false-positive because it relies on Cloudflare's trained ML classifier, not a brittle regex, and excludes the benign 21-99 band and unscored requests. Any qualifying request triggers (rule threshold >0). MITRE ATT&CK T1059.007 (JavaScript) and T1190 (Exploit Public-Facing Application). Covers OneFlare scenario 02.",
+    "queryType": "scheduled",
+    "queryLang": "2.0",
+    "severity": "High",
+    "status": "Active",
+    "expirationMode": "Permanent",
+    "treatAsThreat": "UNDEFINED",
+    "networkQuarantine": false,
+    "s1ql": "",
+    "scheduledParams": {
+      "query": "class_uid=4002 dataSource.cloudflare_dataset='HTTP Requests' unmapped.WAFXSSAttackScore=*\n| let src_ip    = src_endpoint.ip\n| let host      = http_request.url.hostname\n| let country   = src_endpoint.location.country\n| let xss_score = number(unmapped.WAFXSSAttackScore)\n| let malice    = 100 - xss_score\n| filter xss_score >= 1 AND xss_score <= 20\n| group\n    attack_requests = count(),\n    lowest_score    = min(xss_score),\n    sample_uri      = max_by(http_request.url.url_string, malice),\n    sample_ua       = any(http_request.user_agent),\n    first_seen      = oldest(timestamp),\n    last_seen       = newest(timestamp)\n  by src_ip, host, country\n| let detection_time = simpledateformat(last_seen, 'yyyy-MM-dd HH:mm:ss z')\n| sort -attack_requests\n| columns detection_time, src_ip, host, country, attack_requests, lowest_score, sample_uri, sample_ua, first_seen\n| limit 100",
+      "runIntervalMinutes": 1,
+      "lookbackWindowMinutes": 5,
+      "threshold": {
+        "value": 0,
+        "operator": "Greater"
+      }
+    },
+    "_entityMappings_pending_feature": [
+      {
+        "columnName": "src_ip"
+      },
+      {
+        "columnName": "host"
+      },
+      {
+        "columnName": "country"
+      }
+    ]
+  },
+  "filter": {
+    "siteIds": [
+      "2433185103040607397"
+    ]
+  }
+}

@@ -1,0 +1,36 @@
+{
+  "data": {
+    "name": "CF-Access-CredStuffing \u2014 Login Brute Force / Credential Stuffing on portal.novamind.ai",
+    "description": "Detects credential stuffing and brute-force login abuse against the NovaMind employee portal (class_uid 4002, 'HTTP Requests'). Isolates authentication endpoints (url_string contains '/login') and failed/throttled responses (unmapped.EdgeResponseStatus in 401/403/429, evaluated as a string), then groups by src_ip + host and fires when a single source produces >= 10 failed login responses in the 5-minute window. Also surfaces distinct_uas as a corroborating signal: many failures with a rotating User-Agent from one IP is classic stuffing tooling. Low false-positive because a legitimate user fat-fingering a password does not produce 10+ 401/403/429s in five minutes from one IP; the internal >=10 floor is the effective threshold (rule threshold kept at >0 so the query's own filter governs). MITRE ATT&CK T1110.004 (Credential Stuffing) and T1110.001 (Password Guessing). Covers OneFlare scenario 04.",
+    "queryType": "scheduled",
+    "queryLang": "2.0",
+    "severity": "High",
+    "status": "Active",
+    "expirationMode": "Permanent",
+    "treatAsThreat": "UNDEFINED",
+    "networkQuarantine": false,
+    "s1ql": "",
+    "scheduledParams": {
+      "query": "class_uid=4002 dataSource.cloudflare_dataset='HTTP Requests'\n| let src_ip = src_endpoint.ip\n| let host   = http_request.url.hostname\n| let uri    = http_request.url.url_string\n| let status = unmapped.EdgeResponseStatus\n| filter uri contains:anycase(\"/login\")\n| filter status in ('401','403','429')\n| group\n    failed_logins = count(),\n    distinct_uas  = estimate_distinct(http_request.user_agent),\n    sample_status = any(status),\n    sample_ua     = any(http_request.user_agent),\n    country       = any(src_endpoint.location.country),\n    first_seen    = oldest(timestamp),\n    last_seen     = newest(timestamp)\n  by src_ip, host\n| filter failed_logins >= 10\n| let detection_time = simpledateformat(last_seen, 'yyyy-MM-dd HH:mm:ss z')\n| sort -failed_logins\n| columns detection_time, src_ip, host, failed_logins, distinct_uas, sample_status, sample_ua, country, first_seen\n| limit 100",
+      "runIntervalMinutes": 1,
+      "lookbackWindowMinutes": 5,
+      "threshold": {
+        "value": 0,
+        "operator": "Greater"
+      }
+    },
+    "_entityMappings_pending_feature": [
+      {
+        "columnName": "src_ip"
+      },
+      {
+        "columnName": "host"
+      }
+    ]
+  },
+  "filter": {
+    "siteIds": [
+      "2433185103040607397"
+    ]
+  }
+}

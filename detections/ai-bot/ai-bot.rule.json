@@ -1,0 +1,36 @@
+{
+  "data": {
+    "name": "CF-Bot-Polymorphic \u2014 User-Agent-Rotating Scraper / Bot against NovaMind",
+    "description": "Detects polymorphic (User-Agent-rotating) automation against NovaMind web properties (class_uid 4002, 'HTTP Requests'). Legitimate clients present one stable User-Agent per source; scraping and evasion frameworks rotate the UA header on nearly every request to dodge simple UA blocklists. Groups by src_ip, computes distinct_uas = estimate_distinct(http_request.user_agent), and fires when a single source presents >= 5 distinct User-Agents in the 5-minute window, surfacing total_requests and distinct_paths as breadth-of-crawl context. This UA-rotation signal is queryable and stable today; Cloudflare BotScore and the JA4 TLS fingerprint are now enabled in Logpush and serve as strong corroboration (a rotating UA riding one invariant JA4 is high-confidence bot), but are intentionally not part of the predicate here because bracket-indexed array fields (ja4_fingerprint_list[0]) do not parse in the scheduled-rule engine. Low false-positive because a >=5 distinct-UA floor from one IP in five minutes is not producible by a human on a browser. MITRE ATT&CK T1595 (Active Scanning), T1071 (Application Layer Protocol); MITRE ATLAS AML.T0002 (AI Model / data reconnaissance via scraping). Covers OneFlare scenario 07.",
+    "queryType": "scheduled",
+    "queryLang": "2.0",
+    "severity": "Medium",
+    "status": "Active",
+    "expirationMode": "Permanent",
+    "treatAsThreat": "UNDEFINED",
+    "networkQuarantine": false,
+    "s1ql": "",
+    "scheduledParams": {
+      "query": "class_uid=4002 dataSource.cloudflare_dataset='HTTP Requests'\n| let src_ip = src_endpoint.ip\n| group\n    distinct_uas   = estimate_distinct(http_request.user_agent),\n    total_requests = count(),\n    distinct_paths = estimate_distinct(http_request.url.path),\n    sample_ua      = any(http_request.user_agent),\n    host           = any(http_request.url.hostname),\n    country        = any(src_endpoint.location.country),\n    first_seen     = oldest(timestamp),\n    last_seen      = newest(timestamp)\n  by src_ip\n| filter distinct_uas >= 5\n| let detection_time = simpledateformat(last_seen, 'yyyy-MM-dd HH:mm:ss z')\n| sort -distinct_uas\n| columns detection_time, src_ip, host, distinct_uas, total_requests, distinct_paths, sample_ua, country, first_seen\n| limit 100",
+      "runIntervalMinutes": 1,
+      "lookbackWindowMinutes": 5,
+      "threshold": {
+        "value": 0,
+        "operator": "Greater"
+      }
+    },
+    "_entityMappings_pending_feature": [
+      {
+        "columnName": "src_ip"
+      },
+      {
+        "columnName": "host"
+      }
+    ]
+  },
+  "filter": {
+    "siteIds": [
+      "2433185103040607397"
+    ]
+  }
+}
