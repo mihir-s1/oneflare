@@ -13,7 +13,7 @@
     "scheduledParams": {
       "query": "class_uid=4002 dataSource.cloudflare_dataset='HTTP Requests'\n| let src_ip = src_endpoint.ip\n| let uri    = http_request.url.url_string\n| let method = http_request.http_method\n| filter uri contains:anycase(\"/chat\")\n| filter method = 'POST'\n| group\n    injection_posts = count(),\n    distinct_uas    = estimate_distinct(http_request.user_agent),\n    sample_uri      = any(uri),\n    sample_ua       = any(http_request.user_agent),\n    host            = any(http_request.url.hostname),\n    country         = any(src_endpoint.location.country),\n    first_seen      = oldest(timestamp),\n    last_seen       = newest(timestamp)\n  by src_ip\n| filter injection_posts >= 5\n| let detection_time = simpledateformat(last_seen, 'yyyy-MM-dd HH:mm:ss z')\n| sort -injection_posts\n| columns detection_time, src_ip, host, injection_posts, distinct_uas, sample_uri, sample_ua, country, first_seen\n| limit 100",
       "runIntervalMinutes": 1,
-      "lookbackWindowMinutes": 5,
+      "lookbackWindowMinutes": 15,
       "threshold": {
         "value": 0,
         "operator": "Greater"
