@@ -6,10 +6,14 @@
   "main": "src/index.js",
   "compatibility_date": "2025-01-01",
 
-  // Public custom domain. custom_domain:true makes Cloudflare create the proxied
-  // DNS record and provision the TLS cert for the apex automatically. The zone
-  // one-flare.com is active in this account. (To use www or a subdomain instead,
-  // change the pattern below and redeploy.)
+  // Public custom domain for the CONSOLE (this UI). custom_domain:true makes
+  // Cloudflare create the proxied DNS record + TLS cert automatically.
+  // one-flare.com is the shared reference instance.
+  // PARTNERS: either (a) change this pattern to a domain in YOUR account before
+  // `wrangler deploy`, or (b) skip deploying the console to Cloudflare entirely
+  // and run it locally with `docker compose up` (see README). This route only
+  // affects where the console UI is hosted — NOT the attack targets, which are
+  // controlled by LAB_CF_DOMAIN / the Settings page.
   "routes": [
     { "pattern": "one-flare.com", "custom_domain": true }
   ],

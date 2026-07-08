@@ -221,14 +221,18 @@ else
   success "Access app created for portal.$CLOUDFLARE_DOMAIN"
 
   if [[ "$APP_ID" != "exists" ]]; then
-    POLICY=$(cf_api POST "/accounts/$CLOUDFLARE_ACCOUNT_ID/access/apps/$APP_ID/policies" --data '{
-      "name": "Allow NovaMind Employees",
-      "decision": "allow",
-      "precedence": 1,
-      "include": [{"email_domain": {"domain": "novamind.ai"}}],
-      "require": [],
-      "exclude": []
-    }' | cf_ok)
+    # Employees allowed into the portal by email domain. Override with
+    # ACCESS_EMAIL_DOMAIN=yourcompany.com in your .env; defaults to the
+    # NovaMind sample company.
+    EMAIL_DOMAIN="${ACCESS_EMAIL_DOMAIN:-novamind.ai}"
+    POLICY=$(cf_api POST "/accounts/$CLOUDFLARE_ACCOUNT_ID/access/apps/$APP_ID/policies" --data "{
+      \"name\": \"Allow Employees\",
+      \"decision\": \"allow\",
+      \"precedence\": 1,
+      \"include\": [{\"email_domain\": {\"domain\": \"$EMAIL_DOMAIN\"}}],
+      \"require\": [],
+      \"exclude\": []
+    }" | cf_ok)
     [[ "$POLICY" == "ok" ]] && success "Access policy created" || warn "Policy: $POLICY"
   fi
 fi

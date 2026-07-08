@@ -1,234 +1,175 @@
-# OneFlare
+# OneFlare — Cloudflare + SentinelOne detection lab
 
-A complete Cloudflare + SentinelOne detection lab. Deploy a mock company across Cloudflare Workers, generate realistic attack traffic, and demonstrate end-to-end detection and automated response through SentinelOne Hyperautomation.
+Stand up a mock company ("NovaMind") across Cloudflare, generate realistic attack
+traffic from a web console, and see it flow end-to-end into SentinelOne detections and
+automated response. Built as a joint SentinelOne + Cloudflare demo you can replicate in
+**your own Cloudflare NFR + your own SentinelOne console**.
 
 ```
-Attack simulation scripts
-        ↓
-Cloudflare  (WAF · Gateway · Access · Workers)
-        ↓
-Logpush → SentinelOne
-        ↓
-STAR Detections
-        ↓
-Hyperautomation → Cloudflare response actions
+Attack console (this repo)  ──▶  Cloudflare (WAF · Bot · Gateway · Access · Workers)
+                                        │
+                                   Logpush → SentinelOne SDL
+                                        │
+                                   OCSF parser → STAR / scheduled detections
+                                        │
+                                   Hyperautomation → Cloudflare response actions
 ```
 
-## What Gets Deployed
+> **Reference instance:** a live shared deployment runs at **https://one-flare.com**
+> (maintained by the SentinelOne + Cloudflare teams). This repo is the template to run
+> your **own**. The console is pre-configured per deployment, so anyone who opens it can
+> launch scenarios with zero setup — no credentials are baked into the code.
 
-Three linked Cloudflare Workers forming a mock company ("NovaMind"):
+---
 
-| Worker | URL | Attack Surface |
+## What gets deployed
+
+Three linked Cloudflare Workers forming the mock company, plus the attack console:
+
+| Component | URL | Attack surface |
 |---|---|---|
-| Shop | `shop.YOUR_DOMAIN` | SQLi on `/search`, XSS on reviews, path traversal |
-| Portal | `portal.YOUR_DOMAIN` | Credential stuffing, brute force, impossible travel |
-| API | `api.YOUR_DOMAIN` | Bulk data exfil via `/api/v1/customers/export` |
+| Shop | `shop.<your-domain>` | SQLi on `/search`, XSS on reviews, path traversal |
+| Portal | `portal.<your-domain>` | Credential stuffing, brute force (Access-protected) |
+| API | `api.<your-domain>` | Bulk data exfil, API enumeration, AI-bot scraping, prompt injection on `/api/v1/chat` |
+| Console (this UI) | local `:3000` or your own Cloudflare domain | Runs the scenarios, streams output live |
 
-Five detection scenarios covered end-to-end — see [`docs/story-map.md`](docs/story-map.md).
+Eight scenarios (`sqli`, `xss`, `traversal`, `cred`, `dns`, `exfil`, `bot`, `promptinj`)
+— full narrative in [`docs/story-map.md`](docs/story-map.md).
 
 ---
 
 ## Prerequisites
 
-| Tool | Version | Install |
-|---|---|---|
-| Node.js | v18+ | https://nodejs.org |
-| Wrangler CLI | v4+ | `npm install -g wrangler` |
-| curl | any | pre-installed on macOS/Linux |
-| python3 | v3.8+ | pre-installed on macOS |
+| Need | Notes |
+|---|---|
+| Cloudflare account with a zone (domain) | Enterprise features (Bot Management, some WAF ML scores) require the matching entitlements; the core WAF/Gateway/Access scenarios work on lower tiers |
+| SentinelOne console + SDL | Console URL, a service API token, and an HEC ingest URL + token |
+| Docker + Docker Compose | to run the console locally |
+| Node 18+ and Wrangler v4 (`npm i -g wrangler`) | to deploy the Workers / console |
+| `python3`, `curl` | used by `cloudflare/setup.sh` |
 
 ---
 
-## Cloudflare Account Setup
+## Setup — five steps
 
-These steps are required once before running the setup script. They cannot be automated via API.
+### Step 1 — Configure `.env.local`
+```bash
+git clone https://github.com/amin-hamidi-s1/oneflare.git
+cd oneflare
+cp .env.example .env.local      # then edit it — see the grouped, commented vars
+```
+`.env.example` documents every variable (sensitive vs non-sensitive). At minimum set
+`CLOUDFLARE_API_TOKEN`, `CLOUDFLARE_ACCOUNT_ID`, `CLOUDFLARE_ZONE_ID`, `CLOUDFLARE_DOMAIN`.
 
-### 1. Create a Cloudflare account
-Sign up at [cloudflare.com](https://cloudflare.com) if you don't have one.
-
-### 2. Add your domain
-1. Go to **Dashboard → Add a Site**
-2. Enter your domain (e.g. `novamind.ai`) and select the **Free** plan
-3. Cloudflare will scan existing DNS records — confirm and continue
-4. Copy the two **nameserver addresses** Cloudflare gives you (e.g. `marge.ns.cloudflare.com`)
-5. Go to your domain registrar and update the domain's nameservers to Cloudflare's
-6. Wait for propagation (5 minutes to 48 hours — usually under 30 minutes)
-7. The zone status will change from **Pending** to **Active**
-
-> **Using workers.dev instead of a custom domain?**
-> You can skip steps 2–7 and use the free `*.workers.dev` subdomain Cloudflare assigns your account. The setup script will claim one automatically.
-
-### 3. Get your credentials
-
-**API Token** — go to [dash.cloudflare.com → My Profile → API Tokens → Create Token](https://dash.cloudflare.com/profile/api-tokens)
-
-Select **Create Custom Token** and add these permissions:
+**API token scopes** (dash.cloudflare.com → My Profile → API Tokens → Create Custom Token):
 
 | Resource | Permission |
 |---|---|
-| Zone / Zone | Read |
-| Zone / Zone Settings | Edit |
-| Zone / DNS | Edit |
-| Zone / Firewall Services | Edit |
-| Zone / Workers Routes | Edit |
-| Account / Workers Scripts | Edit |
-| Account / Zero Trust | Edit |
-| Account / Access: Apps and Policies | Edit |
-| Account / Logs | Edit |
+| Account · Workers Scripts | Edit |
+| Account · Cloudflare Containers | Edit (only if deploying the console to Cloudflare) |
+| Account · Account Rulesets | Edit |
+| Account · Access: Apps and Policies | Edit |
+| Account · Zero Trust | Edit |
+| Account · Logs | Edit |
+| Zone · Zone / Zone Settings / DNS / WAF / Workers Routes / Logs | Read / Edit |
 
-**Account ID** — visible in the right sidebar of any zone page in the dashboard, or at `dash.cloudflare.com → your account name`.
-
-**Zone ID** — visible in the right sidebar when you click into your domain's zone in the dashboard.
-
-### 4. Enable Zero Trust / Access
-1. Go to **[one.dash.cloudflare.com](https://one.dash.cloudflare.com)** (Zero Trust dashboard)
-2. Select your account and complete the Zero Trust onboarding (free tier is fine)
-3. This enables Cloudflare Access and Gateway — required for the portal and DNS scenarios
-
-### 5. Configure Logpush → SentinelOne
-
-Logpush cannot be configured via the API in this repo (it requires your SentinelOne endpoint details). Configure it manually in the dashboard:
-
-**Zone-level Logpush** (`dash.cloudflare.com → your zone → Analytics → Logpush`):
-
-| Dataset | Scenarios covered |
-|---|---|
-| HTTP requests | Data exfil, login attacks, all web traffic |
-| Firewall events | WAF blocks — SQLi, XSS, path traversal |
-| DNS logs | DNS tunneling / C2 beaconing |
-
-**Zero Trust Logpush** (`one.dash.cloudflare.com → Logs → Logpush`):
-
-| Dataset | Scenarios covered |
-|---|---|
-| Access requests | Credential stuffing, impossible travel |
-| Gateway DNS | DNS tunneling / C2 beaconing |
-| Audit logs v2 | Configuration change detection |
-| Gateway HTTP | Data exfil through Zero Trust layer |
-
-For each job, select **SentinelOne** as the destination and enter your SentinelOne Logpush endpoint URL and API token.
-
----
-
-## Quick Start
-
+### Step 2 — Provision Cloudflare (`cloudflare/setup.sh`)
 ```bash
-# 1. Clone the repo
-git clone https://github.com/aminhamidi-s1/oneflare.git
-cd oneflare
-
-# 2. Configure credentials
-cp .env.example .env.local
-# Edit .env.local and fill in all four values
-
-# 3. Load credentials into your shell
-source .env.local
-
-# 4. Run the setup script
 bash cloudflare/setup.sh
 ```
+Automates: claim a `workers.dev` subdomain → deploy `novamind-{shop,portal,api}` →
+bind `shop|portal|api.<domain>` custom domains → create WAF rules
+(`cloudflare/waf/rules.json`) → create the Access app + policy for the portal
+(email domain via `ACCESS_EMAIL_DOMAIN`) → create the Gateway DNS logging policy.
 
-The script runs through 7 steps:
-1. Validates prerequisites and credentials
-2. Claims a `workers.dev` subdomain
-3. Deploys all three Workers
-4. Creates DNS records for custom subdomains
-5. Creates WAF rules (SQLi, XSS, path traversal, exfil logging, login logging)
-6. Creates Cloudflare Access app and policy for the portal
-7. Creates Gateway DNS logging policy
+**Manual steps the script does NOT do:**
+1. **KV namespace** for the incident/status page:
+   `wrangler kv namespace create INCIDENT_KV`, then paste the returned id into each
+   `cloudflare/workers/*/wrangler.toml` (replace `placeholder_incident_kv_id`).
+2. **Worker secrets** (optional; lab defaults exist):
+   `wrangler secret put PORTAL_USERNAME --name novamind-portal` (and `PORTAL_PASSWORD`,
+   `API_USERNAME`, `API_PASSWORD` on `novamind-api`).
+3. **Logpush → SentinelOne** — see Step 3.
 
-### After setup — set Worker secrets
+### Step 3 — Wire Cloudflare → SentinelOne
+**a. Logpush jobs** (dash.cloudflare.com → your zone → Analytics → Logpush; and
+one.dash.cloudflare.com → Logs → Logpush). Destination = **SentinelOne** (your HEC URL +
+token):
 
-The portal and API Workers accept credentials via Wrangler secrets (not hardcoded). Set them after deployment:
-
-```bash
-# Portal credentials (used in credential stuffing simulation)
-wrangler secret put PORTAL_USERNAME --name novamind-portal
-wrangler secret put PORTAL_PASSWORD --name novamind-portal
-
-# API credentials (used in data exfil simulation)
-wrangler secret put API_USERNAME --name novamind-api
-wrangler secret put API_PASSWORD --name novamind-api
-```
-
-If secrets are not set, the Workers fall back to default lab credentials documented in the attack scripts.
-
----
-
-## Environment Variables
-
-| Variable | Description | Where to find it |
+| Dataset | Level | Scenarios |
 |---|---|---|
-| `CLOUDFLARE_API_TOKEN` | Scoped API token | Dashboard → My Profile → API Tokens |
-| `CLOUDFLARE_ACCOUNT_ID` | Your account ID | Dashboard right sidebar |
-| `CLOUDFLARE_ZONE_ID` | Zone ID for your domain | Zone overview right sidebar |
-| `CLOUDFLARE_DOMAIN` | Your domain (e.g. `novamind.ai`) | Whatever domain you added |
-| `CF_GATEWAY_DOH_URL` | Location-specific Gateway DoH endpoint | `one.dash.cloudflare.com → Networks → Resolvers & Proxies → DNS locations → [your location] → Edit → Setup instructions` — copy the **DNS over HTTPS** URL (hex subdomain, not your team name) |
+| HTTP requests | Zone | exfil, login attacks, bot, prompt-injection, all web traffic |
+| Firewall events | Zone | WAF blocks — SQLi / XSS / traversal |
+| Gateway DNS | Zero Trust | DNS tunneling / C2 |
+| Access requests, Audit logs v2, Gateway HTTP | Zero Trust | cred attacks, config-change, ZT-layer exfil |
 
-Copy `.env.example` to `.env.local`, populate it, and run `source .env.local` before any commands.
-**Never commit `.env.local`** — it is gitignored.
+For **HTTP requests**, include the ML/score fields the detections use:
+`WAFAttackScore`, `WAFSQLiAttackScore`, `WAFXSSAttackScore`, `WAFRCEAttackScore`,
+`FirewallForAIInjectionScore`, and — if you have the enterprise **Bot Management**
+add-on — `BotScore`, `JA4`, `BotTags` (needed for the polymorphic-bot detection).
+
+**b. OCSF parser** — deploy `parsers/cloudflare-ocsf-parser/` to your SDL so Cloudflare
+logs normalize to OCSF (upload via the S1 parser pipeline / Marketplace).
+
+**c. Detections / response (optional)** — `detections/`, `hyperautomation/`, and
+`dashboards/` are JSON artifacts you import manually into SentinelOne; deployment calls
+are documented in [`detections/README.md`](detections/README.md).
+
+### Step 4 — Run the console
+**Local (recommended for partners):**
+```bash
+cd lab-ui/frontend && npm install && npm run build && cd ..
+docker compose up --build          # → http://localhost:3000
+```
+**Or deploy to your own Cloudflare** (edit the domain in `lab-ui/wrangler.jsonc` first):
+```bash
+cd lab-ui && npx wrangler deploy
+```
+Point the console at your NFR by setting `LAB_CF_DOMAIN` (+ optional `LAB_*`) in your
+environment — the backend serves these from `GET /api/config` so every browser is
+pre-configured. Sensitive tokens are entered per-browser in the Settings page and never
+leave your backend.
+
+### Step 5 — Run scenarios & confirm
+Open the console → pick a scenario → **Run**. Watch live output, then confirm the data
+landed in your SDL (PowerQuery over `class_uid` 4002/4003, `dataSource.name='Cloudflare'`).
 
 ---
 
-## Repository Structure
+## Docs map (for humans and AI agents)
 
+| Path | What it covers |
+|---|---|
+| [`docs/story-map.md`](docs/story-map.md) | Every attack → detection → response scenario |
+| [`ARCHITECTURE.md`](ARCHITECTURE.md) | 4-layer architecture, worker/route table, OCSF dataset→class map |
+| [`docs/infrastructure.md`](docs/infrastructure.md) | Cloudflare infra plan / checklist |
+| [`cloudflare/`](cloudflare/) | `setup.sh`, worker sources, `waf/rules.json`, `gateway/dns-policy.json` |
+| [`attack-scripts/`](attack-scripts/) | Scenario scripts + `config.py` (targeting) + drip campaigns |
+| [`parsers/`](parsers/) | Cloudflare→OCSF SDL parser |
+| [`detections/`](detections/) | STAR / scheduled detection rules (+ deploy notes) |
+| [`hyperautomation/`](hyperautomation/) | SOAR response workflow JSON |
+| [`dashboards/`](dashboards/) | SDL dashboard definitions |
+| [`lab-ui/`](lab-ui/) | The console: `frontend/` (Vite/React) + `backend/` (FastAPI) |
+
+---
+
+## Repository structure
 ```
 oneflare/
-├── README.md
-├── .env.example               # Credential template — safe to commit
-├── .gitignore
-├── cloudflare/
-│   ├── setup.sh               # Master setup script — run this
-│   ├── workers/
-│   │   ├── shop/              # Public webstore Worker
-│   │   ├── portal/            # Employee portal Worker (Access protected)
-│   │   └── api/               # REST API Worker (exfil target)
-│   ├── waf/
-│   │   └── rules.json         # WAF filters and firewall rules as code
-│   └── gateway/
-│       └── dns-policy.json    # Gateway DNS logging policy
-├── docs/
-│   ├── story-map.md           # Attack → Detection → Response scenarios
-│   ├── infrastructure.md      # Infrastructure setup reference
-│   └── s1-hyperautomation-actions.md  # SentinelOne action reference
-├── attack-scripts/            # Simulation scripts (coming soon)
-├── detections/                # SentinelOne STAR rules (coming soon)
-└── hyperautomation/           # Response workflow definitions (coming soon)
+├── README.md · ARCHITECTURE.md · .env.example
+├── cloudflare/       setup.sh · workers/{shop,portal,api} · waf · gateway
+├── attack-scripts/   scenarios/*.py · campaigns/ · config.py · utils.py
+├── lab-ui/           frontend/ (React) · backend/ (FastAPI) · wrangler.jsonc · docker-compose.yml
+├── parsers/          cloudflare-ocsf-parser/
+├── detections/       STAR + scheduled rule JSON
+├── hyperautomation/  response workflow JSON
+├── dashboards/       SDL dashboards
+└── docs/             story-map · infrastructure · s1 action reference
 ```
 
----
-
-## CI/CD
-
-Push to `main` automatically deploys all three Workers via GitHub Actions (`.github/workflows/deploy.yml`).
-
-Add these as repository secrets in **GitHub → Settings → Secrets → Actions**:
-
-| Secret | Value |
-|---|---|
-| `CLOUDFLARE_API_TOKEN` | Your scoped API token |
-| `CLOUDFLARE_ACCOUNT_ID` | Your account ID |
-
----
-
-## Detection Scenarios
-
-Full scenario details including STAR rule logic and Hyperautomation workflows are in [`docs/story-map.md`](docs/story-map.md).
-
-| # | Scenario | Cloudflare Product | Key Response |
-|---|---|---|---|
-| 1 | SQL injection on webstore | WAF | Block IP, PCAP capture |
-| 2 | Credential stuffing on portal | Access | Block IP, zone lockdown |
-| 3 | Impossible travel | Access | Block both IPs, SOC gate |
-| 4 | DNS tunneling / C2 beaconing | Gateway DNS | Sinkhole domain, DNS Firewall |
-| 5 | Bulk data exfiltration | Workers + WAF | Firewall rule, WAF tune |
-| 6 | Unauthorized config change | Audit logs | Rollback rule, notify SOC |
-
----
-
-## Security Notes
-
-- Workers contain intentional vulnerabilities (reflected XSS on `/search`, open export endpoint) — these are **by design** for WAF and detection testing
-- CORS is intentionally permissive on the API Worker for the same reason
-- Worker credentials are configurable via Wrangler secrets; default fallback values are for lab use only
-- `wrangler.toml` files use `YOUR_DOMAIN` as a placeholder — the setup script replaces this with your actual domain at deploy time
+## Security notes
+- Workers contain **intentional** vulnerabilities (reflected XSS, open export endpoint,
+  mock chat) for WAF/detection testing. Deploy only to a lab/NFR account.
+- No secrets are committed. `.env.local` is gitignored; the console never bakes tokens
+  into code — they stay in your browser / backend env.
+- CORS is intentionally permissive on the API Worker for testing.
