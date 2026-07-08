@@ -13,7 +13,7 @@
     "scheduledParams": {
       "query": "class_uid=4002 dataSource.cloudflare_dataset='HTTP Requests'\n| let src_ip     = src_endpoint.ip\n| let host       = http_request.url.hostname\n| let country    = src_endpoint.location.country\n| let uri        = http_request.url.url_string\n| let rce_score  = number(unmapped.WAFRCEAttackScore)\n| let is_waf_rce = rce_score >= 1 AND rce_score <= 20\n| let is_path    = uri contains:anycase(\"/etc/passwd\") OR uri contains:anycase(\"../\") OR uri contains:anycase(\"%2e%2e\")\n| filter (rce_score >= 1 AND rce_score <= 20) OR http_request.url.url_string contains:anycase(\"/etc/passwd\") OR http_request.url.url_string contains:anycase(\"../\") OR http_request.url.url_string contains:anycase(\"%2e%2e\")\n| group\n    attack_requests = count(),\n    waf_hits        = count(is_waf_rce),\n    path_hits       = count(is_path),\n    lowest_score    = min(rce_score),\n    sample_uri      = any(uri),\n    sample_ua       = any(http_request.user_agent),\n    first_seen      = oldest(timestamp),\n    last_seen       = newest(timestamp)\n  by src_ip, host, country\n| let detection_time = simpledateformat(last_seen, 'yyyy-MM-dd HH:mm:ss z')\n| sort -attack_requests\n| columns detection_time, src_ip, host, country, attack_requests, waf_hits, path_hits, lowest_score, sample_uri, sample_ua, first_seen\n| limit 100",
       "runIntervalMinutes": 1,
-      "lookbackWindowMinutes": 5,
+      "lookbackWindowMinutes": 15,
       "threshold": {
         "value": 0,
         "operator": "Greater"

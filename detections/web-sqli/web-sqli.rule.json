@@ -13,7 +13,7 @@
     "scheduledParams": {
       "query": "class_uid=4002 dataSource.cloudflare_dataset='HTTP Requests' unmapped.WAFSQLiAttackScore=*\n| let src_ip     = src_endpoint.ip\n| let host       = http_request.url.hostname\n| let country    = src_endpoint.location.country\n| let sqli_score = number(unmapped.WAFSQLiAttackScore)\n| let malice     = 100 - sqli_score\n| filter sqli_score >= 1 AND sqli_score <= 20\n| group\n    attack_requests = count(),\n    lowest_score    = min(sqli_score),\n    sample_uri      = max_by(http_request.url.url_string, malice),\n    sample_ua       = any(http_request.user_agent),\n    first_seen      = oldest(timestamp),\n    last_seen       = newest(timestamp)\n  by src_ip, host, country\n| let detection_time = simpledateformat(last_seen, 'yyyy-MM-dd HH:mm:ss z')\n| sort -attack_requests\n| columns detection_time, src_ip, host, country, attack_requests, lowest_score, sample_uri, sample_ua, first_seen\n| limit 100",
       "runIntervalMinutes": 1,
-      "lookbackWindowMinutes": 5,
+      "lookbackWindowMinutes": 15,
       "threshold": {
         "value": 0,
         "operator": "Greater"
