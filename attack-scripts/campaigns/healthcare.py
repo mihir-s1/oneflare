@@ -1,6 +1,6 @@
 """
 campaigns/healthcare.py — Operation HIPAA Breach
-5-phase attack chain. NovaMind target: acmecorp-api + acmecorp-portal.
+5-phase attack chain. MedCore target: acmecorp-api + acmecorp-portal.
 
 MITRE ATT&CK mapping
 --------------------
@@ -24,16 +24,16 @@ from .engine import send_request, log_phase_event, sleep_between_requests
 # Payloads — ported from cf-attack-sim-v2/attacks/payloads/healthcare.py
 # ---------------------------------------------------------------------------
 
-# Recon paths: NovaMind API routes first, then healthcare-specific paths
+# Recon paths: MedCore API routes first, then healthcare-specific paths
 # that still generate WAF/bot-score signal even without a matching worker route.
 RECON_PATHS = [
-    # NovaMind real routes (acmecorp-api)
+    # MedCore real routes (acmecorp-api)
     "/api/v1/admin",
     "/api/v1/users",
     "/api/v1/customers",
     "/api/v1/training-data",
     "/api/v1/health",
-    # NovaMind real routes (acmecorp-portal)
+    # MedCore real routes (acmecorp-portal)
     "/login",
     "/dashboard",
     "/admin",

@@ -87,15 +87,52 @@ _task: Optional[asyncio.Task] = None
 # Internal helpers
 # ---------------------------------------------------------------------------
 
+def _signal_shop_incident(active: bool) -> bool:
+    """
+    Flip the SoleDrop shop /status page. The CTF is hardcoded to the SoleDrop
+    shop (CAMPAIGNS['ctf']['target_url']), which owns its own /api/incident + KV
+    — separate from the api/portal workers. Authenticated by the body `key`
+    (INCIDENT_KEY); silently no-ops if that secret isn't set.
+    """
+    try:
+        import datetime
+        import requests
+        import config as _cfg
+        key = getattr(_cfg, "INCIDENT_KEY", "") or ""
+        if not key:
+            return False
+        target = CAMPAIGNS.get("ctf", {}).get("target_url", "https://shop.soledrop.co")
+        payload = {
+            "key":      key,
+            "active":   active,
+            "title":    "Drop-Day Bot Swarm Detected" if active else "",
+            "severity": "critical" if active else "none",
+            "affected_services": ["Storefront", "Checkout API", "Customer Accounts"] if active else [],
+            "started_at": datetime.datetime.utcnow().isoformat() + "Z" if active else None,
+            "message":  ("Automated checkout traffic detected during the drop — mitigation in progress."
+                         if active else "Incident cleared."),
+        }
+        requests.post(f"{target}/api/incident", json=payload,
+                      timeout=8, allow_redirects=False, verify=False)
+        return True
+    except Exception:
+        return False
+
+
 def _resolve_target(campaign_key: str) -> str:
     """
-    Build the base URL for a campaign from the same env the scripts use.
-    target_role in CAMPAIGNS drives which worker we hit.
+    Build the base URL for a campaign. An explicit per-campaign `target_url`
+    (e.g. the CTF's hardcoded SoleDrop shop) wins; otherwise `target_role`
+    drives which shared worker we hit.
     """
+    # A hardcoded target_url on the campaign entry overrides role-based routing.
+    entry = CAMPAIGNS.get(campaign_key, {})
+    if entry.get("target_url"):
+        return entry["target_url"]
     # Import config lazily (it reads env vars / .env.local)
     try:
         import config as _cfg
-        role = CAMPAIGNS[campaign_key]["target_role"]
+        role = entry["target_role"]
         return {
             "shop":   _cfg.SHOP_URL,
             "portal": _cfg.PORTAL_URL,
@@ -254,16 +291,7 @@ async def _engine_task(campaign_key: str, mode: str, phase, volume: str):
     is_ctf = campaign_key == "ctf"
 
     if is_ctf:
-        await asyncio.to_thread(
-            signal_incident,
-            True,
-            "Agentic AI Breakout",
-            "critical",
-            ["Pyxis Chat API"],
-            1,
-            "Box 1 — CF WAF",
-            "CTF campaign launched from ThreatOps console",
-        )
+        await asyncio.to_thread(_signal_shop_incident, True)
 
     try:
         if mode == "live":
@@ -365,18 +393,12 @@ def stop() -> None:
     _state["phase"]    = None
 
     if campaign_key == "ctf":
-        try:
-            signal_incident(False)
-        except Exception:
-            pass
+        _signal_shop_incident(False)
 
 
 def clear_incident() -> None:
-    """Clear the NovaMind/Pyxis status banner without stopping the campaign."""
-    try:
-        signal_incident(False)
-    except Exception:
-        pass
+    """Clear the SoleDrop shop status banner without stopping the campaign."""
+    _signal_shop_incident(False)
 
 
 def get_logs(since: int = 0) -> list:

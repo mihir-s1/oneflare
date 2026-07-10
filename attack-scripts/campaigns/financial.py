@@ -1,6 +1,6 @@
 """
 campaigns/financial.py — Operation Wire Fraud
-5-phase attack chain. NovaMind target: acmecorp-api + acmecorp-shop.
+5-phase attack chain. Meridian target: acmecorp-api + acmecorp-shop.
 
 MITRE ATT&CK mapping
 --------------------
@@ -23,17 +23,17 @@ from .engine import send_request, log_phase_event, sleep_between_requests
 # Payloads — ported from cf-attack-sim-v2/attacks/payloads/financial.py
 # ---------------------------------------------------------------------------
 
-# Recon paths repointed to NovaMind routes where they exist, supplemented
+# Recon paths repointed to Meridian routes where they exist, supplemented
 # with legacy financial paths that still yield WAF/recon signal.
 RECON_PATHS = [
-    # NovaMind real routes (acmecorp-api)
+    # Meridian real routes (acmecorp-api)
     "/api/v1/admin",
     "/api/v1/customers",
     "/api/v1/customers/export",
     "/api/v1/orders",
     "/api/v1/auth/login",
     "/api/v1/health",
-    # NovaMind real routes (acmecorp-shop)
+    # Meridian real routes (acmecorp-shop)
     "/search",
     "/login",
     "/checkout",
@@ -62,12 +62,12 @@ SCANNER_AGENTS = [
 ACCOUNT_IDS = list(range(10001, 10051))
 
 CUSTOMER_EMAILS = [
-    "admin@novamind.ai",
-    "john.smith@novamind.ai",
-    "sarah.jones@novamind.ai",
-    "m.johnson@novamind.ai",
-    "account.holder@novamind.ai",
-    "premium.user@novamind.ai",
+    "admin@meridianbank.com",
+    "john.smith@meridianbank.com",
+    "sarah.jones@meridianbank.com",
+    "m.johnson@meridianbank.com",
+    "account.holder@meridianbank.com",
+    "premium.user@meridianbank.com",
 ]
 
 CRED_USERNAMES = [
@@ -78,7 +78,7 @@ CRED_USERNAMES = [
 
 CRED_PASSWORDS = [
     "Banking2023!", "Summer2024!", "Welcome1!", "Password123",
-    "NovaMind1!", "BankAdmin2024!", "Wire@2023", "Secure#Bank1",
+    "Meridian1!", "BankAdmin2024!", "Wire@2023", "Secure#Bank1",
 ]
 
 SQLI_FINANCIAL = [
@@ -131,7 +131,7 @@ def fire_phase_1_one(target, log_buffer, log_counter, stop_flag):
 
 def fire_phase_1_many(count, delay_range, target, log_buffer, log_counter, stop_flag):
     log_phase_event(
-        "Phase 1: Initial Reconnaissance — mapping NovaMind banking infrastructure",
+        "Phase 1: Initial Reconnaissance — mapping Meridian banking infrastructure",
         1, "financial", log_buffer, log_counter,
     )
     for _ in range(count):
@@ -200,7 +200,7 @@ def fire_phase_3_one(target, log_buffer, log_counter, stop_flag):
 
 def fire_phase_3_many(count, delay_range, target, log_buffer, log_counter, stop_flag):
     log_phase_event(
-        "Phase 3: Credential Stuffing — botnet targeting NovaMind login endpoints",
+        "Phase 3: Credential Stuffing — botnet targeting Meridian login endpoints",
         3, "financial", log_buffer, log_counter,
     )
     for _ in range(count):
@@ -240,7 +240,7 @@ def fire_phase_4_one(target, log_buffer, log_counter, stop_flag):
 
 def fire_phase_4_many(count, delay_range, target, log_buffer, log_counter, stop_flag):
     log_phase_event(
-        "Phase 4: Wire Transfer Exploitation — SQL injection on NovaMind financial API endpoints",
+        "Phase 4: Wire Transfer Exploitation — SQL injection on Meridian financial API endpoints",
         4, "financial", log_buffer, log_counter,
     )
     for _ in range(count):
@@ -287,7 +287,7 @@ PHASES = [
         "number": 1,
         "name": "Initial Reconnaissance",
         "description": (
-            "Attacker mapping NovaMind banking infrastructure and identifying "
+            "Attacker mapping Meridian banking infrastructure and identifying "
             "exposed endpoints using scanner fingerprints."
         ),
         "mitre_technique": "T1595.002 — Active Scanning: Vulnerability Scanning",
@@ -341,7 +341,7 @@ PHASES = [
         "number": 3,
         "name": "Credential Stuffing",
         "description": (
-            "Botnet of rotating IPs simultaneously attacking NovaMind login "
+            "Botnet of rotating IPs simultaneously attacking Meridian login "
             "with leaked credentials."
         ),
         "mitre_technique": "T1110.004 — Brute Force: Credential Stuffing",
@@ -369,7 +369,7 @@ PHASES = [
         "number": 4,
         "name": "Wire Transfer Exploitation",
         "description": (
-            "Attacker attempting to manipulate NovaMind financial API endpoints "
+            "Attacker attempting to manipulate Meridian financial API endpoints "
             "with SQL injection."
         ),
         "mitre_technique": "T1190 — Exploit Public-Facing Application (SQLi)",

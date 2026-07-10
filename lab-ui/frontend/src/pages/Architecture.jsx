@@ -387,6 +387,16 @@ const WORKERS = [
     bgClass: 'bg-blue-500/5',
     textClass: 'text-blue-400',
   },
+  {
+    name: 'SoleDrop Shop',
+    description: 'Standalone sneaker-drop shop — the OneFlare CTF target. Self-contained Worker with its own /api/incident + KV; attacks flip /status and degrade checkout/admin.',
+    url: 'https://shop.soledrop.co',
+    routes: ['/', '/products', '/status', '/login', '/dashboard', '/admin', '/api/v1/products', '/api/v1/cart', '/api/v1/checkout', '/api/v1/customers', '/api/v1/chat', '/api/incident'],
+    color: 'red',
+    borderClass: 'border-red-500/30',
+    bgClass: 'bg-red-500/5',
+    textClass: 'text-red-400',
+  },
 ]
 
 const FLOW_NODES = [
