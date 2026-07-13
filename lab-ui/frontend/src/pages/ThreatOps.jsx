@@ -3,7 +3,7 @@ import { useSearchParams } from 'react-router-dom'
 import {
   Swords, Play, Square, Trash2, RefreshCw,
   Radio, Moon, Shield, Bot,
-  Syringe, Zap, AlertTriangle, CheckCircle2,
+  Syringe, Zap, AlertTriangle, CheckCircle2, ExternalLink,
 } from 'lucide-react'
 
 // ── Engine constants (mirror backend) ────────────────────────────────────────
@@ -24,29 +24,29 @@ const CTF_BOXES_META = [
     num: 1,
     icon: Shield,
     name: 'CF WAF',
-    sub: 'Recon + Rule Triggers',
-    desc: 'Scanner recon, SQLi probes, and header anomalies that light up CF Managed Rules.',
+    sub: 'Drop Recon + Rule Triggers',
+    desc: 'Bots enumerate hidden drop URLs and probe sensitive paths; scanner UAs and SQLi light up CF Managed Rules.',
   },
   {
     num: 2,
     icon: Bot,
     name: 'Bot Management',
     sub: 'Constant JA4, Rotating UA',
-    desc: 'Polymorphic bot changes User-Agent every request — but JA4 fingerprint never changes.',
+    desc: 'Drop-day sneaker-bot swarm changes User-Agent every request — but the JA4 fingerprint never changes.',
   },
   {
     num: 3,
     icon: Syringe,
-    name: 'Firewall for AI',
-    sub: 'Prompt Injection Attack',
-    desc: 'Rogue AI fires prompt injection at /api/v1/chat — jailbreaks, DAN mode, JNDI in prompts.',
+    name: 'Firewall for AI + ATO',
+    sub: 'Concierge Injection + Stuffing',
+    desc: 'Bots hit the SoleDrop concierge (/api/v1/chat) with prompt injection and run credential stuffing on /login.',
   },
   {
     num: 4,
     icon: Zap,
-    name: 'Agentic Breakout',
-    sub: 'Full Multi-Vector Storm',
-    desc: 'All vectors combined at high volume — RCE, SQLi, XSS, AI injection across every endpoint.',
+    name: 'Full Breakout',
+    sub: 'Multi-Vector Storm',
+    desc: 'All vectors at drop-day volume — carding, RCE/SSRF/traversal, and bulk customer-data pulls across every endpoint.',
   },
 ]
 
@@ -96,7 +96,7 @@ function StatsBar({ stats }) {
 }
 
 /** Phase timeline — done/active/pending nodes with connecting lines */
-function PhaseTimeline({ phases, activePhase, campaignColor }) {
+function PhaseTimeline({ phases, activePhase, campaignColor, showStatus = false }) {
   if (!phases || !phases.length) return null
   const color = campaignColor || '#f38020'
   return (
@@ -130,6 +130,14 @@ function PhaseTimeline({ phases, activePhase, campaignColor }) {
               >
                 {ph.name ? ph.name.split(' ').slice(0, 2).join(' ') : `Ph ${num}`}
               </div>
+              {showStatus && (
+                <div
+                  className="text-[9px] mt-0.5 font-mono uppercase tracking-wide"
+                  style={{ color: isDone ? '#4ade80' : isActive ? color : '#64748b' }}
+                >
+                  {isDone ? 'done' : isActive ? 'running' : 'queued'}
+                </div>
+              )}
             </div>
             {i < phases.length - 1 && (
               <div
@@ -152,7 +160,7 @@ function PhaseTimeline({ phases, activePhase, campaignColor }) {
 function TalkingPoints({ phase, campaignColor, emptyMsg }) {
   if (!phase) {
     return (
-      <div className="text-center text-slate-600 text-sm py-8 font-mono">
+      <div className="text-center text-slate-400 text-sm py-8 font-mono">
         {emptyMsg || '// Launch a campaign to see live talking points here'}
       </div>
     )
@@ -169,7 +177,7 @@ function TalkingPoints({ phase, campaignColor, emptyMsg }) {
       </div>
       <div className="p-4 space-y-3 bg-[#1a0a2e]">
         {phase.description && (
-          <p className="text-xs text-slate-500 italic leading-relaxed">{phase.description}</p>
+          <p className="text-xs text-slate-300 italic leading-relaxed">{phase.description}</p>
         )}
         {[
           { key: 'what_fires',        label: 'What Fires',      badge: 'bg-blue-900/40 text-blue-300 border border-blue-800/60'           },
@@ -205,10 +213,14 @@ function TalkingPoints({ phase, campaignColor, emptyMsg }) {
 
 /** Color-coded live log terminal */
 function LogTerminal({ entries, onClear, emptyMsg }) {
-  const bottomRef = useRef(null)
+  const scrollRef = useRef(null)
+  // Auto-scroll to the newest line. Keyed on the full entries array (not just
+  // its length) and set imperatively on the scroll container, so batched
+  // polling updates always pin the view to the bottom of the fixed-height box.
   useEffect(() => {
-    bottomRef.current?.scrollIntoView({ behavior: 'smooth' })
-  }, [entries.length])
+    const el = scrollRef.current
+    if (el) el.scrollTop = el.scrollHeight
+  }, [entries])
 
   const tagStyle = {
     BLOCKED: 'bg-red-500/20 text-red-400',
@@ -234,23 +246,24 @@ function LogTerminal({ entries, onClear, emptyMsg }) {
   return (
     <div className="rounded-xl border border-[#2d1b4e] overflow-hidden flex flex-col">
       <div className="flex items-center justify-between px-4 py-2.5 border-b border-[#2d1b4e] bg-[#1a0a2e]">
-        <span className="text-xs font-mono font-semibold uppercase tracking-wider text-slate-500 flex items-center gap-1.5">
+        <span className="text-xs font-mono font-semibold uppercase tracking-wider text-slate-300 flex items-center gap-1.5">
           <Radio className="w-3 h-3 text-orange-400" />
           Live Attack Log
         </span>
         <button
           onClick={onClear}
-          className="flex items-center gap-1 text-xs text-slate-600 hover:text-slate-300 transition-colors font-mono"
+          className="flex items-center gap-1 text-xs text-slate-400 hover:text-orange-400 transition-colors font-mono"
         >
           <Trash2 className="w-3 h-3" /> Clear
         </button>
       </div>
       <div
-        className="terminal-scroll flex-1 overflow-y-auto p-3 font-mono text-xs leading-relaxed"
-        style={{ backgroundColor: '#0a0a0a', height: 480 }}
+        ref={scrollRef}
+        className="terminal-scroll overflow-y-auto p-3 font-mono text-xs leading-relaxed"
+        style={{ backgroundColor: '#0a0a0a', minHeight: 280, maxHeight: 480 }}
       >
         {entries.length === 0 ? (
-          <div className="text-slate-700 text-center pt-20">
+          <div className="text-slate-500 text-center pt-20">
             {emptyMsg || '// Select a campaign + mode above, then press Launch'}
           </div>
         ) : (
@@ -260,16 +273,15 @@ function LogTerminal({ entries, onClear, emptyMsg }) {
             const ts  = entry.ts || new Date().toLocaleTimeString('en-US', { hour12: false })
             return (
               <div key={idx} className="flex gap-2 items-baseline mb-0.5">
-                <span className="text-slate-700 shrink-0 text-[10px]">{ts}</span>
+                <span className="text-slate-500 shrink-0 text-[10px]">{ts}</span>
                 <span className={`shrink-0 w-16 text-center px-1 py-px rounded text-[10px] font-semibold ${tagStyle[tag] || tagStyle.INFO}`}>
                   {tag}
                 </span>
-                <span className="text-slate-400 break-all">{msg}</span>
+                <span className="text-slate-200 break-all">{msg}</span>
               </div>
             )
           })
         )}
-        <div ref={bottomRef} />
       </div>
     </div>
   )
@@ -331,15 +343,15 @@ function LiveCountdown({ mode, activePhase, phaseStart, batchCountdown, isCTF })
     >
       <div className="flex flex-col gap-0.5">
         <span className="text-base font-medium text-slate-200">Phase {activePhase}</span>
-        <span className="text-[10px] uppercase tracking-widest text-slate-600">Current Phase</span>
+        <span className="text-[10px] uppercase tracking-widest text-slate-400">Current Phase</span>
       </div>
       <div className="flex flex-col gap-0.5">
         <span className="text-base font-medium text-slate-200">{batchCountdown}s</span>
-        <span className="text-[10px] uppercase tracking-widest text-slate-600">Next Batch</span>
+        <span className="text-[10px] uppercase tracking-widest text-slate-400">Next Batch</span>
       </div>
       <div className="flex flex-col gap-0.5">
         <span className="text-base font-medium text-slate-200">{fmtTime(phaseRemaining)}</span>
-        <span className="text-[10px] uppercase tracking-widest text-slate-600">Phase Advances</span>
+        <span className="text-[10px] uppercase tracking-widest text-slate-400">Phase Advances</span>
       </div>
     </div>
   )
@@ -359,7 +371,7 @@ function ControlsPanel({
   onLaunch,
   onStop,
   launchLabel,
-  children, // extra buttons (e.g. Clear Pyxis Incident)
+  children, // extra buttons (e.g. Clear Incident)
 }) {
   return (
     <div className="rounded-xl border border-[#2d1b4e] bg-[#1a0a2e] overflow-hidden">
@@ -393,7 +405,7 @@ function ControlsPanel({
               <div className="flex items-center gap-1.5 font-semibold text-sm mb-0.5">
                 <Icon className="w-3.5 h-3.5" />{label}
               </div>
-              <div className="text-[10px] text-slate-600">{sub}</div>
+              <div className="text-[10px] text-slate-400">{sub}</div>
             </button>
           ))}
         </div>
@@ -402,7 +414,7 @@ function ControlsPanel({
         {mode === 'preseed' && (
           <div className="space-y-3">
             <div>
-              <div className="text-[10px] font-mono font-semibold uppercase tracking-widest text-slate-600 mb-2">
+              <div className="text-[10px] font-mono font-semibold uppercase tracking-widest text-slate-400 mb-2">
                 {isCTF ? 'Pre-seed Target' : 'Phase Selection'}
               </div>
               {isCTF ? (
@@ -423,7 +435,7 @@ function ControlsPanel({
                     🧠 All Boxes{' '}
                     <span className="text-xs font-normal opacity-70">— full CTF scenario (recommended)</span>
                   </button>
-                  <div className="text-[10px] font-mono font-semibold uppercase tracking-widest text-slate-600 mt-1">
+                  <div className="text-[10px] font-mono font-semibold uppercase tracking-widest text-slate-400 mt-1">
                     Troubleshoot individual box:
                   </div>
                   <div className="grid grid-cols-4 gap-1.5">
@@ -475,7 +487,7 @@ function ControlsPanel({
 
             {/* Volume */}
             <div>
-              <div className="text-[10px] font-mono font-semibold uppercase tracking-widest text-slate-600 mb-2">Volume</div>
+              <div className="text-[10px] font-mono font-semibold uppercase tracking-widest text-slate-400 mb-2">Volume</div>
               <div className="grid grid-cols-3 gap-1.5">
                 {[
                   { val: 'low',    label: 'Low',    sub: '~40 reqs'  },
@@ -498,13 +510,13 @@ function ControlsPanel({
                     `}
                   >
                     <div className="text-sm font-semibold">{label}</div>
-                    <div className="text-[10px] text-slate-600">{sub}</div>
+                    <div className="text-[10px] text-slate-400">{sub}</div>
                   </button>
                 ))}
               </div>
             </div>
 
-            <p className="text-xs text-slate-600">
+            <p className="text-xs text-slate-400">
               {isCTF
                 ? <>Use <strong className="text-slate-400">High → All Boxes</strong> to pre-seed all 4 CTF boxes before the event.</>
                 : <>Use <strong className="text-slate-400">High → All Phases</strong> the night before to seed 400+ WAF events.</>
@@ -528,7 +540,7 @@ function ControlsPanel({
             <br />Best for live audience demos — slow enough to narrate each phase.
             {isCTF && (
               <span className="block mt-1 text-orange-300">
-                NovaMind/Pyxis status page will flip to <strong>Incident Detected</strong> automatically.
+                SoleDrop shop status will flip to <strong>Incident Detected</strong> automatically.
               </span>
             )}
           </div>
@@ -624,7 +636,7 @@ export default function ThreatOps() {
   const [phaseStart, setPhaseStart]         = useState(null)
   const [batchCountdown, setBatchCountdown] = useState(LIVE_BATCH_SECONDS)
 
-  // ── Clear Pyxis incident ──────────────────────────────────────────────────
+  // ── Clear incident ──────────────────────────────────────────────────
   const [clearingIncident, setClearingIncident] = useState(false)
 
   // ── Refs ──────────────────────────────────────────────────────────────────
@@ -877,14 +889,14 @@ export default function ThreatOps() {
     setCtfBoxStates({ 1: 'waiting', 2: 'waiting', 3: 'waiting', 4: 'waiting' })
   }
 
-  // ── Clear Pyxis incident ──────────────────────────────────────────────────
+  // ── Clear incident ──────────────────────────────────────────────────
   async function handleClearIncident() {
     setClearingIncident(true)
     try {
       await fetch('/api/campaign/clear-incident', { method: 'POST' })
       setCtfLog(prev => [...prev, {
         type: 'info',
-        text: 'NovaMind/Pyxis status page incident cleared.',
+        text: 'SoleDrop shop status incident cleared.',
         ts: new Date().toLocaleTimeString('en-US', { hour12: false }),
       }])
     } catch (_) {
@@ -913,8 +925,8 @@ export default function ThreatOps() {
         </div>
         <div>
           <h1 className="text-2xl font-bold text-slate-100">ThreatOps Campaigns</h1>
-          <p className="text-slate-400 text-sm mt-1 leading-relaxed">
-            Drip-flow attack console — industry campaigns + Agentic AI Breakout CTF. Targets NovaMind Technologies on Cloudflare.
+          <p className="text-slate-300 text-sm mt-1 leading-relaxed">
+            Drip-flow attack console — industry campaigns + the SoleDrop drop-day bot-swarm CTF. Live attacks against Cloudflare-protected targets.
           </p>
         </div>
         <div className="ml-auto shrink-0 flex items-center gap-2">
@@ -962,7 +974,7 @@ export default function ThreatOps() {
           <div>
             <SectionLabel>Step 1 — Select Industry</SectionLabel>
             {loadingCampaigns ? (
-              <div className="text-slate-600 text-sm font-mono animate-pulse">Loading campaigns...</div>
+              <div className="text-slate-400 text-sm font-mono animate-pulse">Loading campaigns...</div>
             ) : industryCampaigns.length === 0 ? (
               <div className="rounded-xl border border-[#2d1b4e] p-6 text-center">
                 <AlertTriangle className="w-6 h-6 text-orange-400 mx-auto mb-2" />
@@ -1069,14 +1081,45 @@ export default function ThreatOps() {
             style={{ background: '#fff5f0', borderColor: '#7c2d12', border: '1px solid #f5cba7', borderLeftColor: '#7c2d12', borderLeftWidth: 4, color: '#7c2d12' }}
           >
             <strong className="block mb-1" style={{ color: '#4a1404' }}>
-              🧠 OneFlare ThreatOps CTF — Agentic AI Breakout
+              🤖 OneFlare ThreatOps CTF — Drop-Day Bot Swarm
             </strong>
-            A rogue AI agent attacks <strong>NovaMind AI</strong> across 4 escalating boxes. Each box maps to a detection layer.
-            Participants hunt for clues in the <strong>Cloudflare WAF dashboard</strong> and <strong>SentinelOne AI-SIEM</strong>.
+            A sneaker-bot operation attacks the <strong>SoleDrop shop</strong> across 4 escalating boxes — drop recon,
+            bot swarm, concierge injection + account takeover, and a full multi-vector breakout. Each box maps to a
+            Cloudflare detection layer; hunt the clues in the <strong>Cloudflare dashboard</strong> and <strong>SentinelOne AI-SIEM</strong>.
             {' '}Target:{' '}
             <code className="text-xs bg-[#7c2d12]/10 px-1.5 py-0.5 rounded font-mono">
-              {campaigns.find(c => c.key === 'ctf')?.target || 'novamind.acmecorp.dev'}
+              {campaigns.find(c => c.key === 'ctf')?.target || 'shop.soledrop.co'}
             </code>
+          </div>
+
+          {/* SoleDrop live-target links */}
+          <div className="rounded-xl border border-[#2d1b4e] bg-[#1a0a2e] p-4">
+            <span className="text-xs font-mono font-semibold uppercase tracking-wider text-slate-300 flex items-center gap-1.5 mb-3">
+              <ExternalLink className="w-3 h-3 text-orange-400" /> Live target — SoleDrop shop
+            </span>
+            <div className="flex flex-wrap gap-2">
+              {[
+                ['Storefront',        'https://shop.soledrop.co/'],
+                ['Status',            'https://shop.soledrop.co/status'],
+                ['Admin (Order Ops)', 'https://shop.soledrop.co/admin'],
+                ['Login',             'https://shop.soledrop.co/login'],
+                ['Account',           'https://shop.soledrop.co/dashboard'],
+              ].map(([label, href]) => (
+                <a
+                  key={href}
+                  href={href}
+                  target="_blank"
+                  rel="noopener noreferrer"
+                  className="inline-flex items-center gap-1.5 px-3 py-1.5 rounded-lg border border-[#2d1b4e] bg-[#1f0d38] text-xs font-semibold text-slate-200 hover:text-orange-400 hover:border-orange-500/40 transition-colors"
+                >
+                  {label} <ExternalLink className="w-3 h-3 opacity-60" />
+                </a>
+              ))}
+            </div>
+            <p className="text-[11px] text-slate-400 mt-2.5">
+              During a run these flip live — <code className="font-mono">/status</code> shows the incident,
+              {' '}<code className="font-mono">/admin</code> shows failed orders, and checkout returns errors.
+            </p>
           </div>
 
           {/* CTF Boxes grid */}
@@ -1088,6 +1131,35 @@ export default function ThreatOps() {
           {/* Step 2 CTF: Configure + Launch */}
           <div>
             <SectionLabel>Step 2 — Configure &amp; Launch CTF</SectionLabel>
+
+            {/* Full-width horizontal box-progress timeline */}
+            <div className="rounded-xl border border-[#2d1b4e] bg-[#1a0a2e] overflow-hidden mb-4">
+              <div className="px-4 py-2.5 border-b border-[#2d1b4e] bg-[#1f0d38] flex items-center justify-between">
+                <span className="text-xs font-mono font-semibold uppercase tracking-wider text-slate-300">CTF Box Timeline</span>
+                <span className="text-xs font-mono text-slate-400">
+                  {(() => {
+                    const total = ctfPhases.length || 4
+                    const ap = activeCampaignKey === 'ctf' ? activePhase : 0
+                    if (!ap) return `${total} boxes · not started`
+                    return `Box ${ap} of ${total} · ${total - ap} left`
+                  })()}
+                </span>
+              </div>
+              <div className="p-4">
+                <PhaseTimeline
+                  phases={ctfPhases.length ? ctfPhases : [
+                    { name: 'Box 1 — CF WAF' },
+                    { name: 'Box 2 — Bot Mgmt' },
+                    { name: 'Box 3 — AI Firewall + ATO' },
+                    { name: 'Box 4 — Breakout' },
+                  ]}
+                  activePhase={activeCampaignKey === 'ctf' ? activePhase : 0}
+                  campaignColor="#7c2d12"
+                  showStatus
+                />
+              </div>
+            </div>
+
             <div className="grid grid-cols-1 lg:grid-cols-[380px_1fr] gap-4 items-start">
 
               {/* Left: controls + timeline */}
@@ -1106,7 +1178,7 @@ export default function ThreatOps() {
                   onStop={handleStop}
                   launchLabel={ctfLaunchLabel}
                 >
-                  {/* Clear Pyxis Incident button */}
+                  {/* Clear Incident button */}
                   <button
                     onClick={handleClearIncident}
                     disabled={clearingIncident}
@@ -1115,31 +1187,17 @@ export default function ThreatOps() {
                     {clearingIncident ? (
                       <><RefreshCw className="w-3 h-3 animate-spin" /> Clearing...</>
                     ) : (
-                      <><CheckCircle2 className="w-3 h-3" /> Clear Pyxis Incident</>
+                      <><CheckCircle2 className="w-3 h-3" /> Clear Incident</>
                     )}
                   </button>
                 </ControlsPanel>
 
-                {/* CTF box timeline + talking points */}
+                {/* Hunt clues for the active box */}
                 <div className="rounded-xl border border-[#2d1b4e] bg-[#1a0a2e] overflow-hidden">
                   <div className="px-4 py-2.5 border-b border-[#2d1b4e] bg-[#1f0d38]">
-                    <span className="text-xs font-mono font-semibold uppercase tracking-wider text-slate-500">CTF Box Timeline</span>
+                    <span className="text-xs font-mono font-semibold uppercase tracking-wider text-slate-300">Hunt Clues</span>
                   </div>
-                  <div className="p-4 space-y-4">
-                    <PhaseTimeline
-                      phases={
-                        ctfPhases.length
-                          ? ctfPhases
-                          : [
-                              { name: 'Box 1 — CF WAF'       },
-                              { name: 'Box 2 — Bot Mgmt'     },
-                              { name: 'Box 3 — AI Firewall'  },
-                              { name: 'Box 4 — Breakout'     },
-                            ]
-                      }
-                      activePhase={activeCampaignKey === 'ctf' ? activePhase : 0}
-                      campaignColor="#7c2d12"
-                    />
+                  <div className="p-4">
                     <TalkingPoints
                       phase={activeCampaignKey === 'ctf' ? activePhaseData : null}
                       campaignColor="#7c2d12"

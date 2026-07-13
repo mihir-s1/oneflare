@@ -1,10 +1,10 @@
 """
 campaigns/engine.py — Shared HTTP sender for all drip-flow campaigns.
 
-Ported from cf-attack-sim-v2/attacks/engine.py and repointed at NovaMind
+Ported from cf-attack-sim-v2/attacks/engine.py and repointed at the lab
 infrastructure. Import this module; do not invoke via subprocess.
 
-AUTHORIZED LAB USE ONLY — targets are NovaMind workers on *.acmecorp-lab.workers.dev
+AUTHORIZED LAB USE ONLY — targets are the lab workers on *.acmecorp-lab.workers.dev
 (or a custom domain set via CLOUDFLARE_DOMAIN). Never target external hosts.
 """
 
@@ -69,6 +69,7 @@ def send_request(
     stop_flag=None,
     phase=1,
     industry="",
+    json_body=None,
 ):
     """
     Fire one HTTP request and append a structured result dict to log_buffer.
@@ -109,14 +110,30 @@ def send_request(
 
     try:
         if method == "POST":
-            resp = requests.post(
-                url,
-                data=data,
-                headers=base_headers,
-                timeout=8,
-                allow_redirects=False,
-                verify=False,
-            )
+            # json_body sends a real application/json body (so Firewall for AI
+            # can parse the prompt). params still ride the query string, so any
+            # attack marker placed there lands in the logged url_string even on
+            # POST (Cloudflare HTTP logs never include the request body).
+            if json_body is not None:
+                resp = requests.post(
+                    url,
+                    params=params,
+                    json=json_body,
+                    headers=base_headers,
+                    timeout=8,
+                    allow_redirects=False,
+                    verify=False,
+                )
+            else:
+                resp = requests.post(
+                    url,
+                    params=params,
+                    data=data,
+                    headers=base_headers,
+                    timeout=8,
+                    allow_redirects=False,
+                    verify=False,
+                )
         else:
             resp = requests.get(
                 url,

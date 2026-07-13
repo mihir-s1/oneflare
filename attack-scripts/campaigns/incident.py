@@ -1,5 +1,5 @@
 """
-campaigns/incident.py — Incident webhook helper for NovaMind status page.
+campaigns/incident.py — Incident webhook helper for a lab status page.
 
 Posts to OUR acmecorp-api /api/incident endpoint using the INCIDENT_KEY env var.
 The target URL is built from config.py — never an external host.

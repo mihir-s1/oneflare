@@ -146,6 +146,15 @@ Three Cloudflare Workers forming the mock "NovaMind" target. All deployed via th
 
 **Credentials** for the portal and API Workers are set as Wrangler secrets (not hardcoded) and fall back to lab defaults if unset.
 
+### SoleDrop Shop — CTF target (`shop.soledrop.co`)
+
+A **standalone** sneaker-drop shop Worker (its own `soledrop-worker` repo — *not* under `cloudflare/workers/`) is the live target for the **OneFlare CTF** (`campaigns/ctf.py`, hardcoded via `CAMPAIGNS['ctf']['target_url']`). Unlike the three workers above, it is **self-contained**: it owns its own `/api/incident` endpoint and its own `INCIDENT_KV` namespace — it does **not** share the api worker's KV.
+
+- **Pages:** `/` (storefront), `/products`, `/status`, `/login`, `/dashboard`, `/admin` (Order Ops).
+- **API:** `/api/v1/products|cart|checkout|customers|chat`, `/api/incident`.
+- **Attack behavior:** when the CTF runs, the bot-swarm attack flips `shop.soledrop.co/status` into an incident and the shop **visibly degrades** — checkout returns `503`, the `/admin` Order Ops dashboard shows failed orders, and the storefront shows an incident banner. All of this is driven by the shared incident state, so it flips in lockstep with the attack.
+- The CTF's incident flip targets this shop directly (`lab-ui/backend/campaign_engine.py::_signal_shop_incident`), independent of the NovaMind api worker's status page.
+
 ### WAF Rules (`cloudflare/waf/rules.json`)
 
 Managed WAF rules and custom firewall rules covering:

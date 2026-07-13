@@ -1,6 +1,6 @@
 """
 campaigns/saas.py — Operation Tenant Escape
-5-phase attack chain. NovaMind target: acmecorp-api + acmecorp-shop.
+5-phase attack chain. CloudMatrix target: acmecorp-api + acmecorp-shop.
 
 MITRE ATT&CK mapping
 --------------------
@@ -27,16 +27,16 @@ from .engine import send_request, log_phase_event, sleep_between_requests
 # Payloads — ported from cf-attack-sim-v2/attacks/payloads/saas.py
 # ---------------------------------------------------------------------------
 
-# Recon paths: NovaMind routes first, then SaaS-specific paths.
+# Recon paths: CloudMatrix routes first, then SaaS-specific paths.
 RECON_PATHS = [
-    # NovaMind real routes (acmecorp-api)
+    # CloudMatrix real routes (acmecorp-api)
     "/api/v1/admin",
     "/api/v1/users",
     "/api/v1/training-data",
     "/api/v1/models",
     "/api/v1/billing",
     "/api/v1/health",
-    # NovaMind real routes (acmecorp-shop)
+    # CloudMatrix real routes (acmecorp-shop)
     "/search",
     "/login",
     # SaaS-specific (yields WAF/bot signal even without worker route)
@@ -329,7 +329,7 @@ PHASES = [
         "name": "API Surface Reconnaissance",
         "description": (
             "Attacker enumerating all API endpoints, GraphQL schema, and OAuth "
-            "configuration on NovaMind platform."
+            "configuration on CloudMatrix platform."
         ),
         "mitre_technique": "T1595.002 — Active Scanning: Vulnerability Scanning + T1592 Gather Victim Host Info",
         "target_route": "acmecorp-api /api/v1/*, acmecorp-shop /graphql (recon signal)",
@@ -357,7 +357,7 @@ PHASES = [
         "name": "API Key Extraction",
         "description": (
             "Attacker attempting to extract API keys through misconfiguration "
-            "and injection attacks on NovaMind API."
+            "and injection attacks on CloudMatrix API."
         ),
         "mitre_technique": "T1552.001 — Unsecured Credentials: Credentials In Files + T1212 Credential Access Exploit",
         "target_route": "acmecorp-api /api/v1/admin, /api/v1/users",
@@ -413,7 +413,7 @@ PHASES = [
         "name": "Tenant Isolation Breach Attempt",
         "description": (
             "Attacker attempting to access data from other tenants by manipulating "
-            "tenant IDs on NovaMind training-data and billing."
+            "tenant IDs on CloudMatrix training-data and billing."
         ),
         "mitre_technique": "T1078 — Valid Accounts: Cloud Accounts + T1190 Exploit Public-Facing Application (SQLi/IDOR)",
         "target_route": "acmecorp-api /api/v1/training-data, /api/v1/billing",

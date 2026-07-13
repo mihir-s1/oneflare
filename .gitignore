@@ -26,3 +26,6 @@ lab-ui/docker-compose.override.yml
 
 # Local attack-simulation run logs (per-session JSON artifacts)
 attack-scripts/logs/
+
+# local scratch deploy test (not part of the app)
+lab-ui/deploy-test/
