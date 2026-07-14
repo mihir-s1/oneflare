@@ -17,6 +17,13 @@ services:
       - ./backend:/app
     environment:
       - PYTHONPATH=/app/attack-scripts
+      # Multi-tenant relay wiring (values from gitignored lab-ui/.env; empty = disabled).
+      # A partner instance sets RELAY_URL + LAB_ENROLL_CODE only; the admin console
+      # additionally sets ADMIN_TOKEN to unlock the relay admin proxy + Admin page.
+      - RELAY_URL=${RELAY_URL:-}
+      - LAB_ENROLL_CODE=${LAB_ENROLL_CODE:-}
+      - ADMIN_TOKEN=${ADMIN_TOKEN:-}
+      - LAB_DOMAIN=${LAB_DOMAIN:-lab.soledrop.co}
     working_dir: /app
 
 volumes:
