@@ -100,3 +100,46 @@ this needs its source or a rewrite. Recommend: ship as-is now, treat fidelity as
 - [ ] WS5 admin: batch-delete + visibility; deploy Admin on one-flare.com (ADMIN_TOKEN+RELAY_URL redeploy);
       one-flare.com registers its own identity → main console.
 - [ ] WS-cleanup: retire unused acmecorp-{shop,portal,api} workers.
+
+---
+# SESSION HANDOFF — 2026-07-14 (read this first next session)
+
+## DONE + LIVE
+- Multi-tenant relay DEPLOYED: `oneflare-logpush-relay.acmecorp-lab.workers.dev` (KV REGISTRY
+  `bdbe1493beaa4df4af83a1ed6647df9c`; secrets LAB_ENROLL_CODE=`<LAB_ENROLL_CODE-redacted>`,
+  ADMIN_TOKEN=`<ADMIN_TOKEN-redacted>`). Auth to S1 HEC = `Authorization: Splunk <token>`.
+- 2 Logpush jobs on soledrop.co → relay /ingest: http `1789130`, firewall `1789131` (filter `.lab.soledrop.co`).
+  Existing CTF jobs re-scoped to shop.soledrop.co (no leak). Isolation proven.
+- Shop worker fidelity: mihir PR #1 MERGED + deployed to LIVE shop-soledrop-worker (v22e8361d). New routes
+  (/search,/reviews,/products/<id>,login→401,/api/v1/auth/login,/api/v1/customers/export ~532KB-1MB) live on
+  shop.soledrop.co + *.lab.soledrop.co; incident flip intact. Worker source: github.com/mihir-s1/soledrop-worker
+  (cloned at /tmp/soledrop-worker; NOT in our repo — PR future changes there).
+- All 8 scenarios TLS-unblocked (config.TLS_VERIFY / LAB_TLS_VERIFY, default false). 6/8 detections validated:
+  sqli, xss, traversal, exfil(byte-branch!), prompt-injection, cred-stuffing(fires as brute-force).
+- Admin: batch-delete, per-subdomain destination visibility (site_label/HEC host/redacted token),
+  reset-on-teardown (relay GET /registered). Relay v c573e2d1. docs/multi-tenant-relay.md written.
+- Local docker instance registered as "amin"/"fidelity" (lab-ui/.env has RELAY_URL+LAB_ENROLL_CODE).
+
+## IN-FLIGHT (agent abe71f14547b1cea6, fullstack) — RBAC admin user management
+Building: relay `/auth/*` (login/logout/me/invite/accept-invite/users/role/bootstrap), PBKDF2 passwords,
+KV sessions, roles admin/viewer, backend `/api/auth/*` proxy (forward cookies), frontend login +
+accept-invite + Users tab, DISCREET "Admin portal login" footer link on Settings → /admin. Resend email
+(RESEND_API_KEY) optional; else copy invite link. `cloudflare/workers/logpush-relay/RBAC.md`.
+NEXT SESSION MUST: (1) review the RBAC code; (2) deploy the relay (`cd cloudflare/workers/logpush-relay &&
+wrangler@4 deploy` with CF creds parsed from .env.local via python — the `export VAR = value` spaces gotcha);
+(3) rebuild frontend + restart docker; (4) BOOTSTRAP first admin: `POST /auth/bootstrap` with the ADMIN_TOKEN,
+email `amin.hamidi@sentinelone.com` → get invite_url; SEND it to that email (Gmail MCP is available, or Resend);
+(5) ADD amin.hamidi@sentinelone.com to the Cloudflare Access guest list so he can reach one-flare.com/admin
+(one-flare.com is behind Access OTP — see memory oneflare-access-gate). Invited external admins each need Access too.
+
+## OUTSTANDING
+- Bot/JA4: run `dataSource.name='Cloudflare' http_request.url.hostname='amin.lab.soledrop.co' ja4_fingerprint_list[0].value=* | group c=count()` — 0=JA4 not populating, >0=tune threshold. S1 IS REACHABLE now (Zscaler off) — s1lib.py in scratchpad works; note bracket-field LRQ syntax was finicky.
+- WS2: hide DNS-05 on partner instances (frontend data/scenarios.js + a flag) + relabel scenario cards (shop.acmecorp.dev/api.one-flare.com → the lab subdomain). DNS-05 also needs the hex `<id>.cloudflare-gateway.com/dns-query` URL, not the team cloudflareaccess URL.
+- Deploy Admin on one-flare.com: redeploy novamind-lab-ui with ADMIN_TOKEN + RELAY_URL env (LIVE console change — gate on user go). Then one-flare.com registers its own identity → main console.
+- Retire unused acmecorp-{shop,portal,api} workers.
+- Cred-stuffing rotating-IP: single-host limitation (CF logs real ClientIP, not spoofed XFF) — accepted as brute-force.
+
+## KEY OPS FACTS
+- CF token in .env.local (id ea5de56a…) now has DNS/Routes/Workers Scripts/Workers KV/Logpush/Access Edit; LACKS Certificates:Edit. Account b8e637d5097fff0c694c3290ba81563e; soledrop.co zone cf4d15af4a7eb86b033f859aefec1047.
+- S1 reachable directly now (no Zscaler); scratchpad s1lib.py (LRQ) + cf.py (CF API). Sandbox blocks *.sentinelone.net historically — use dangerouslyDisableSandbox for direct calls if it returns.
+- Branch feat/multi-tenant-relay (NOT merged to main). gh: aminhamidi-s1 (active) + amin-hamidi-s1.
