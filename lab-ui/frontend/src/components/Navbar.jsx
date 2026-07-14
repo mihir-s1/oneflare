@@ -39,18 +39,25 @@ function NavItem({ to, label, icon: Icon, location }) {
 
 export default function Navbar() {
   const location = useLocation()
-  // Admin nav link is gated server-side: only surfaced when this instance has
-  // ADMIN_ENABLED set (the relay operator's own console), never on partner
-  // instances registered against the multi-tenant relay.
+  // Admin nav link is intentionally NOT a prominent, always-visible item —
+  // the RBAC login gate on /admin itself is the real access control. The
+  // only discoverable entry point for a logged-out user is a discreet link
+  // in the Settings page footer. Here we only surface the nav link once the
+  // visitor already has a valid admin-console session (GET /api/auth/me),
+  // and only on an instance where admin is enabled at all.
   const [adminEnabled, setAdminEnabled] = useState(false)
+  const [authed, setAuthed] = useState(false)
   useEffect(() => {
     let alive = true
     fetch('/api/config')
       .then(r => (r.ok ? r.json() : null))
       .then(cfg => { if (alive && cfg?.admin_enabled) setAdminEnabled(true) })
       .catch(() => {})
+    fetch('/api/auth/me')
+      .then(r => { if (alive) setAuthed(r.ok) })
+      .catch(() => {})
     return () => { alive = false }
-  }, [])
+  }, [location.pathname])
 
   return (
     <nav className="glass-nav sticky top-0 z-50">
@@ -80,8 +87,9 @@ export default function Navbar() {
           </div>
         </div>
 
-        {/* Admin — only visible on relay operator instances (admin_enabled) */}
-        {adminEnabled && (
+        {/* Admin — only visible once already logged in (discreet by design;
+            see Settings page footer for the actual entry point) */}
+        {adminEnabled && authed && (
           <NavLink
             to="/admin"
             className={`relative flex items-center gap-1.5 px-3 py-1.5 rounded-lg text-sm font-medium transition-all duration-200 shrink-0 ${

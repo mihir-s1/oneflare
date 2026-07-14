@@ -1,4 +1,4 @@
-from fastapi import FastAPI, WebSocket, HTTPException, Query
+from fastapi import FastAPI, WebSocket, HTTPException, Query, Request
 from fastapi.middleware.cors import CORSMiddleware
 from fastapi.responses import JSONResponse
 from pydantic import BaseModel
@@ -8,6 +8,7 @@ import json
 import os
 from pathlib import Path
 from typing import Optional, Union
+from urllib.parse import quote
 
 app = FastAPI(title="OneFlare Lab API")
 
@@ -48,6 +49,29 @@ class LabRegisterRequest(BaseModel):
 
 class AdminBatchDeleteRequest(BaseModel):
     subdomains: list[str]
+
+
+class AuthLoginRequest(BaseModel):
+    email: str
+    password: str
+
+
+class AuthInviteRequest(BaseModel):
+    email: str
+    role: str
+
+
+class AuthAcceptInviteRequest(BaseModel):
+    token: str
+    password: str
+
+
+class AuthRoleRequest(BaseModel):
+    role: str
+
+
+class AuthBootstrapRequest(BaseModel):
+    email: str
 
 SCRIPTS_DIR = Path("/app/attack-scripts")
 
@@ -440,3 +464,73 @@ def admin_users_delete(body: AdminBatchDeleteRequest):
         status, _ = _li.admin_request("DELETE", f"/admin/user/{subdomain}")
         results.append({"subdomain": subdomain, "status": status})
     return {"ok": True, "results": results}
+
+
+# ---------------------------------------------------------------------------
+# RBAC admin user-management proxy → relay /auth/* (feat/multi-tenant-relay)
+#
+# Unlike /api/admin/* above (gated by ADMIN_TOKEN/admin_enabled — console
+# deployment only), these routes are available on ANY lab-ui instance with
+# RELAY_URL configured: the login layer itself is the gate. Cookies are
+# forwarded both ways so the relay's HttpOnly session cookie round-trips
+# through this proxy transparently. The ADMIN_TOKEN stays server-side only —
+# used solely by /api/auth/bootstrap (break-glass, requires admin_enabled()).
+# ---------------------------------------------------------------------------
+def _proxy_auth(request: Request, method: str, path: str, body: Optional[dict] = None) -> JSONResponse:
+    status, data, set_cookies = _li.auth_request(method, path, cookies=dict(request.cookies), json_body=body)
+    out = JSONResponse(status_code=status, content=data)
+    for cookie_header in set_cookies:
+        out.headers.append("set-cookie", cookie_header)
+    return out
+
+
+@app.post("/api/auth/login")
+def auth_login(request: Request, body: AuthLoginRequest):
+    return _proxy_auth(request, "POST", "/auth/login", body.dict())
+
+
+@app.post("/api/auth/logout")
+def auth_logout(request: Request):
+    return _proxy_auth(request, "POST", "/auth/logout")
+
+
+@app.get("/api/auth/me")
+def auth_me(request: Request):
+    return _proxy_auth(request, "GET", "/auth/me")
+
+
+@app.post("/api/auth/invite")
+def auth_invite(request: Request, body: AuthInviteRequest):
+    return _proxy_auth(request, "POST", "/auth/invite", body.dict())
+
+
+@app.post("/api/auth/accept-invite")
+def auth_accept_invite(request: Request, body: AuthAcceptInviteRequest):
+    return _proxy_auth(request, "POST", "/auth/accept-invite", body.dict())
+
+
+@app.get("/api/auth/users")
+def auth_users(request: Request):
+    return _proxy_auth(request, "GET", "/auth/users")
+
+
+@app.post("/api/auth/users/{email}/role")
+def auth_user_role(request: Request, email: str, body: AuthRoleRequest):
+    return _proxy_auth(request, "POST", f"/auth/users/{quote(email, safe='')}/role", body.dict())
+
+
+@app.delete("/api/auth/users/{email}")
+def auth_user_delete(request: Request, email: str):
+    return _proxy_auth(request, "DELETE", f"/auth/users/{quote(email, safe='')}")
+
+
+@app.post("/api/auth/bootstrap")
+def auth_bootstrap(body: AuthBootstrapRequest):
+    """Break-glass: mint the first admin invite using the server's ADMIN_TOKEN.
+
+    Only available on the console deployment (admin_enabled()). Once any
+    admin user exists on the relay, this returns 409 — see RBAC.md.
+    """
+    _require_admin()
+    status, data = _li.admin_request("POST", "/auth/bootstrap", json_body=body.dict())
+    return JSONResponse(status_code=status, content=data)

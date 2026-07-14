@@ -7,6 +7,7 @@ import ThreatOps from './pages/ThreatOps.jsx'
 import Architecture from './pages/Architecture.jsx'
 import Settings from './pages/Settings.jsx'
 import Admin from './pages/Admin.jsx'
+import AcceptInvite from './pages/AcceptInvite.jsx'
 
 export default function App() {
   return (
@@ -19,6 +20,7 @@ export default function App() {
         <Route path="/architecture" element={<Architecture />} />
         <Route path="/settings" element={<Settings />} />
         <Route path="/admin" element={<Admin />} />
+        <Route path="/admin/accept-invite" element={<AcceptInvite />} />
         {/* Redirects so old bookmarks don't 404 */}
         <Route path="/detections" element={<Navigate to="/architecture" replace />} />
         <Route path="/parsers" element={<Navigate to="/architecture" replace />} />

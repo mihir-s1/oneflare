@@ -795,6 +795,15 @@ export default function Settings() {
       <Section title="Run History" icon={HistoryIcon}>
         <HistoryContent />
       </Section>
+
+      {/* Discreet admin portal entry point — intentionally low-key, not a nav
+          item. The real gate is the credential login on /admin itself; this
+          just keeps it out of partners' faces. */}
+      <div className="pt-2 pb-1 text-center">
+        <a href="/admin" className="text-xs text-slate-600 hover:text-slate-400 transition-colors">
+          Admin portal login &rarr;
+        </a>
+      </div>
     </div>
   )
 }

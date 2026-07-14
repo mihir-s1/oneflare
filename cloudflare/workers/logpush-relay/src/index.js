@@ -17,12 +17,23 @@
 //   GET    /registered?subdomain=<host>   — self-check "am I still registered?"
 //                                            (LAB_ENROLL_CODE) — used by an
 //                                            instance to detect a teardown
-//   GET    /admin/registry                — list all tenants (ADMIN_TOKEN)
-//   GET    /admin/history                 — audit/history log (ADMIN_TOKEN)
-//   POST   /admin/user/:subdomain/enable  — flip status -> active (ADMIN_TOKEN)
-//   POST   /admin/user/:subdomain/disable — flip status -> disabled (ADMIN_TOKEN)
-//   DELETE /admin/user/:subdomain         — teardown: delete registry row (ADMIN_TOKEN)
+//   GET    /admin/registry                — list all tenants (admin session or ADMIN_TOKEN)
+//   GET    /admin/history                 — audit/history log (admin session or ADMIN_TOKEN)
+//   POST   /admin/user/:subdomain/enable  — flip status -> active (admin role required)
+//   POST   /admin/user/:subdomain/disable — flip status -> disabled (admin role required)
+//   DELETE /admin/user/:subdomain         — teardown: delete registry row (admin role required)
 //   GET    /health                        — liveness, no auth
+//
+// RBAC admin user-management — see RBAC.md for the full model:
+//   POST   /auth/login                    — email+password -> session cookie
+//   POST   /auth/logout                   — clear session
+//   GET    /auth/me                       — current session {email, role}
+//   POST   /auth/invite                   — admin: invite a new admin/viewer by email
+//   POST   /auth/accept-invite            — set password from an invite token -> session
+//   GET    /auth/users                    — admin: list admin users + pending invites
+//   POST   /auth/users/:email/role        — admin: change a user's role
+//   DELETE /auth/users/:email             — admin: remove a user
+//   POST   /auth/bootstrap                — ADMIN_TOKEN break-glass: mint the first admin invite
 //
 // :subdomain accepts either the bare slug ("alice") or the full host
 // ("alice.lab.soledrop.co") — see resolveHost().
@@ -34,6 +45,19 @@ const UNKNOWN_PREFIX = "__unknown__:";
 // Exact decompressed content of the gzip test file Cloudflare POSTs to validate
 // a generic HTTP Logpush destination. See handleIngest() for the doc citation.
 const VALIDATION_PING = '{"content":"tests"}';
+
+// ── RBAC admin user-management (see RBAC.md) ─────────────────────────────────
+// Reserved KV key prefixes for the admin-console auth layer. All are skipped
+// by listRegistryRows() (it ignores every "__"-prefixed key), so they never
+// leak into /admin/registry.
+const ADMIN_USER_PREFIX = "__admin_user__:";
+const INVITE_PREFIX = "__invite__:";
+const SESSION_PREFIX = "__session__:";
+const PBKDF2_ITERATIONS = 100000;
+const INVITE_TTL_MS = 7 * 24 * 60 * 60 * 1000; // 7 days
+const SESSION_TTL_MS = 12 * 60 * 60 * 1000; // 12 hours
+const SESSION_COOKIE = "oneflare_admin_session";
+const ADMIN_CONSOLE_ORIGIN = "https://one-flare.com";
 
 // ── Small helpers ─────────────────────────────────────────────────────────────
 
@@ -90,6 +114,103 @@ function checkEnrollCode(request, body, env) {
   const fromBody = (body && body.enroll_code) || "";
   const supplied = header || fromBody;
   return !!env.LAB_ENROLL_CODE && timingSafeEqual(supplied, env.LAB_ENROLL_CODE);
+}
+
+// ── Password hashing (PBKDF2-HMAC-SHA256 via Web Crypto) ─────────────────────
+// Random 16-byte salt, >=100000 iterations, base64-encoded salt+hash stored on
+// the __admin_user__ row alongside the iteration count actually used (so a
+// future bump to PBKDF2_ITERATIONS doesn't break verification of existing
+// users — each row is self-describing).
+
+function bytesToBase64(bytes) {
+  let bin = "";
+  for (let i = 0; i < bytes.length; i++) bin += String.fromCharCode(bytes[i]);
+  return btoa(bin);
+}
+
+function base64ToBytes(b64) {
+  const bin = atob(b64);
+  const bytes = new Uint8Array(bin.length);
+  for (let i = 0; i < bin.length; i++) bytes[i] = bin.charCodeAt(i);
+  return bytes;
+}
+
+// crypto.getRandomValues-backed random token, base64url (no padding) — used
+// for both invite tokens and session ids. >=32 bytes per spec.
+function randomToken(byteLen = 32) {
+  const bytes = new Uint8Array(byteLen);
+  crypto.getRandomValues(bytes);
+  return bytesToBase64(bytes).replace(/\+/g, "-").replace(/\//g, "_").replace(/=+$/, "");
+}
+
+async function pbkdf2Base64(password, saltBytes, iterations) {
+  const enc = new TextEncoder();
+  const keyMaterial = await crypto.subtle.importKey(
+    "raw",
+    enc.encode(password),
+    "PBKDF2",
+    false,
+    ["deriveBits"]
+  );
+  const bits = await crypto.subtle.deriveBits(
+    { name: "PBKDF2", salt: saltBytes, iterations, hash: "SHA-256" },
+    keyMaterial,
+    256
+  );
+  return bytesToBase64(new Uint8Array(bits));
+}
+
+async function createPasswordHash(password) {
+  const saltBytes = new Uint8Array(16);
+  crypto.getRandomValues(saltBytes);
+  const hash = await pbkdf2Base64(password, saltBytes, PBKDF2_ITERATIONS);
+  return {
+    pass_salt: bytesToBase64(saltBytes),
+    pass_hash: hash,
+    iterations: PBKDF2_ITERATIONS,
+  };
+}
+
+// Constant-time compare (via timingSafeEqual) against the stored hash — never
+// short-circuits on a byte-by-byte match.
+async function verifyPassword(password, userRow) {
+  if (!userRow || !userRow.pass_salt || !userRow.pass_hash || !userRow.iterations) return false;
+  const saltBytes = base64ToBytes(userRow.pass_salt);
+  const computed = await pbkdf2Base64(password, saltBytes, userRow.iterations);
+  return timingSafeEqual(computed, userRow.pass_hash);
+}
+
+// ── Session cookie helpers ────────────────────────────────────────────────────
+
+function parseCookies(request) {
+  const header = request.headers.get("Cookie") || "";
+  const out = {};
+  for (const pair of header.split(";")) {
+    const idx = pair.indexOf("=");
+    if (idx === -1) continue;
+    const k = pair.slice(0, idx).trim();
+    const v = pair.slice(idx + 1).trim();
+    if (k) out[k] = decodeURIComponent(v);
+  }
+  return out;
+}
+
+function sessionSetCookie(sid, maxAgeSeconds) {
+  return `${SESSION_COOKIE}=${sid}; HttpOnly; Secure; SameSite=Lax; Path=/; Max-Age=${maxAgeSeconds}`;
+}
+
+function sessionClearCookie() {
+  return `${SESSION_COOKIE}=; HttpOnly; Secure; SameSite=Lax; Path=/; Max-Age=0`;
+}
+
+function withSessionCookie(response, sid) {
+  response.headers.append("Set-Cookie", sessionSetCookie(sid, Math.floor(SESSION_TTL_MS / 1000)));
+  return response;
+}
+
+function withClearedSessionCookie(response) {
+  response.headers.append("Set-Cookie", sessionClearCookie());
+  return response;
 }
 
 // Never expose a full S1 HEC token — show only the last 4 characters.
@@ -158,6 +279,144 @@ async function listRegistryRows(env) {
     cursor = page.list_complete ? undefined : page.cursor;
   } while (cursor);
   return out;
+}
+
+// ── KV: admin users / invites / sessions (RBAC — see RBAC.md) ────────────────
+
+async function listByPrefix(env, prefix) {
+  const out = [];
+  let cursor;
+  do {
+    const page = await env.REGISTRY.list(cursor ? { prefix, cursor } : { prefix });
+    for (const k of page.keys) {
+      const raw = await env.REGISTRY.get(k.name);
+      if (!raw) continue;
+      try {
+        out.push({ key: k.name, row: JSON.parse(raw) });
+      } catch {
+        // skip corrupt row
+      }
+    }
+    cursor = page.list_complete ? undefined : page.cursor;
+  } while (cursor);
+  return out;
+}
+
+function normEmail(email) {
+  return String(email || "").trim().toLowerCase();
+}
+
+async function getAdminUser(env, email) {
+  const raw = await env.REGISTRY.get(ADMIN_USER_PREFIX + normEmail(email));
+  return raw ? JSON.parse(raw) : null;
+}
+
+async function putAdminUser(env, row) {
+  await env.REGISTRY.put(ADMIN_USER_PREFIX + normEmail(row.email), JSON.stringify(row));
+}
+
+async function deleteAdminUser(env, email) {
+  await env.REGISTRY.delete(ADMIN_USER_PREFIX + normEmail(email));
+}
+
+async function listAdminUsers(env) {
+  const rows = await listByPrefix(env, ADMIN_USER_PREFIX);
+  return rows.map((r) => r.row);
+}
+
+async function countAdmins(env) {
+  const users = await listAdminUsers(env);
+  return users.filter((u) => u.role === "admin").length;
+}
+
+async function createInvite(env, email, role, invitedBy) {
+  const token = randomToken(32);
+  const now = Date.now();
+  const row = {
+    email: normEmail(email),
+    role,
+    created_at: new Date(now).toISOString(),
+    expires_at: new Date(now + INVITE_TTL_MS).toISOString(),
+    invited_by: invitedBy || null,
+  };
+  await env.REGISTRY.put(INVITE_PREFIX + token, JSON.stringify(row));
+  return { token, row };
+}
+
+async function getInvite(env, token) {
+  const raw = await env.REGISTRY.get(INVITE_PREFIX + token);
+  return raw ? JSON.parse(raw) : null;
+}
+
+async function deleteInvite(env, token) {
+  await env.REGISTRY.delete(INVITE_PREFIX + token);
+}
+
+async function listInvites(env) {
+  const rows = await listByPrefix(env, INVITE_PREFIX);
+  return rows.map(({ key, row }) => ({ ...row, token: key.slice(INVITE_PREFIX.length) }));
+}
+
+function isExpired(isoString) {
+  const t = new Date(isoString).getTime();
+  return !Number.isFinite(t) || t < Date.now();
+}
+
+async function createSession(env, email, role) {
+  const sid = randomToken(32);
+  const row = {
+    email: normEmail(email),
+    role,
+    expires_at: new Date(Date.now() + SESSION_TTL_MS).toISOString(),
+  };
+  await env.REGISTRY.put(SESSION_PREFIX + sid, JSON.stringify(row));
+  return { sid, row };
+}
+
+async function deleteSession(env, sid) {
+  if (sid) await env.REGISTRY.delete(SESSION_PREFIX + sid);
+}
+
+// Reads + validates the session cookie on `request`. Returns { sid, email,
+// role } or null (missing/invalid/expired — an expired session is deleted).
+async function currentSession(request, env) {
+  const sid = parseCookies(request)[SESSION_COOKIE];
+  if (!sid) return null;
+  const raw = await env.REGISTRY.get(SESSION_PREFIX + sid);
+  if (!raw) return null;
+  let row;
+  try {
+    row = JSON.parse(raw);
+  } catch {
+    return null;
+  }
+  if (isExpired(row.expires_at)) {
+    await deleteSession(env, sid);
+    return null;
+  }
+  return { sid, email: row.email, role: row.role };
+}
+
+// Combined gate for /admin/* and /auth/* admin routes: a valid admin-console
+// session (any role) OR the break-glass ADMIN_TOKEN (treated as role "admin",
+// no email — used for scripted/CI access and the very first bootstrap call).
+async function resolveAuth(request, env) {
+  const session = await currentSession(request, env);
+  if (session) return { email: session.email, role: session.role, viaToken: false };
+  if (checkAdminToken(request, env)) return { email: null, role: "admin", viaToken: true };
+  return null;
+}
+
+// Gate helper for handlers: returns { auth } on success or { error: Response }
+// on failure. `allowViewer:true` lets a viewer-role session through (read-only
+// routes); admin role (or the ADMIN_TOKEN break-glass) is always allowed.
+async function requireAuthGate(request, env, { allowViewer = false } = {}) {
+  const auth = await resolveAuth(request, env);
+  if (!auth) return { error: json({ error: "unauthorized" }, 401) };
+  if (auth.role !== "admin" && !(allowViewer && auth.role === "viewer")) {
+    return { error: json({ error: "forbidden — admin role required" }, 403) };
+  }
+  return { auth };
 }
 
 // ── gzip decompression (Logpush always gzip-compresses the POST body) ────────
@@ -435,23 +694,28 @@ async function handleRegistered(request, env) {
   return json({ exists: true, status: row.status || null });
 }
 
-// ── /admin/* — gated by ADMIN_TOKEN ───────────────────────────────────────────
+// ── /admin/* — gated by an admin-console session (any role) OR ADMIN_TOKEN
+// (break-glass). Mutating routes (enable/disable/delete) require role
+// "admin" — a viewer-role session gets 403. ────────────────────────────────
 
 async function handleAdminRegistry(request, env) {
-  if (!checkAdminToken(request, env)) return json({ error: "unauthorized" }, 401);
+  const gate = await requireAuthGate(request, env, { allowViewer: true });
+  if (gate.error) return gate.error;
   const rows = await listRegistryRows(env);
   const redacted = rows.map((r) => ({ ...r, s1_hec_token: redactToken(r.s1_hec_token) }));
   return json({ ok: true, count: redacted.length, registry: redacted });
 }
 
 async function handleAdminHistory(request, env) {
-  if (!checkAdminToken(request, env)) return json({ error: "unauthorized" }, 401);
+  const gate = await requireAuthGate(request, env, { allowViewer: true });
+  if (gate.error) return gate.error;
   const history = await getHistory(env);
   return json({ ok: true, count: history.length, history });
 }
 
 async function handleAdminUserStatus(request, env, rawSubdomain, enable) {
-  if (!checkAdminToken(request, env)) return json({ error: "unauthorized" }, 401);
+  const gate = await requireAuthGate(request, env);
+  if (gate.error) return gate.error;
   const host = resolveHost(rawSubdomain);
   const raw = await env.REGISTRY.get(host);
   if (!raw) return json({ error: "not found", subdomain: host }, 404);
@@ -465,7 +729,8 @@ async function handleAdminUserStatus(request, env, rawSubdomain, enable) {
 }
 
 async function handleAdminDeleteUser(request, env, rawSubdomain) {
-  if (!checkAdminToken(request, env)) return json({ error: "unauthorized" }, 401);
+  const gate = await requireAuthGate(request, env);
+  if (gate.error) return gate.error;
   const host = resolveHost(rawSubdomain);
   const raw = await env.REGISTRY.get(host);
   if (!raw) return json({ error: "not found", subdomain: host }, 404);
@@ -478,6 +743,223 @@ async function handleAdminDeleteUser(request, env, rawSubdomain) {
   await appendHistory(env, { type: "teardown", subdomain: host });
 
   return json({ ok: true, subdomain: host, deleted: true });
+}
+
+// ── /auth/* — RBAC admin user-management (see RBAC.md) ───────────────────────
+
+async function handleAuthLogin(request, env) {
+  if (request.method !== "POST") return json({ error: "method not allowed" }, 405);
+  let body;
+  try {
+    body = await request.json();
+  } catch {
+    return json({ error: "invalid JSON body" }, 400);
+  }
+  const email = normEmail(body && body.email);
+  const password = String((body && body.password) || "");
+  if (!email || !password) return json({ error: "email and password are required" }, 400);
+
+  const user = await getAdminUser(env, email);
+  const ok = await verifyPassword(password, user);
+  if (!ok) return json({ error: "invalid credentials" }, 401);
+
+  user.last_login = new Date().toISOString();
+  await putAdminUser(env, user);
+
+  const { sid } = await createSession(env, user.email, user.role);
+  return withSessionCookie(json({ ok: true, email: user.email, role: user.role }), sid);
+}
+
+async function handleAuthLogout(request, env) {
+  if (request.method !== "POST") return json({ error: "method not allowed" }, 405);
+  const sid = parseCookies(request)[SESSION_COOKIE];
+  if (sid) await deleteSession(env, sid);
+  return withClearedSessionCookie(json({ ok: true }));
+}
+
+async function handleAuthMe(request, env) {
+  const session = await currentSession(request, env);
+  if (!session) return json({ error: "not authenticated" }, 401);
+  return json({ email: session.email, role: session.role });
+}
+
+async function handleAuthInvite(request, env) {
+  const gate = await requireAuthGate(request, env);
+  if (gate.error) return gate.error;
+  if (request.method !== "POST") return json({ error: "method not allowed" }, 405);
+
+  let body;
+  try {
+    body = await request.json();
+  } catch {
+    return json({ error: "invalid JSON body" }, 400);
+  }
+  const email = normEmail(body && body.email);
+  const role = body && (body.role === "admin" || body.role === "viewer") ? body.role : null;
+  if (!email || !role) return json({ error: "email and role ('admin'|'viewer') are required" }, 400);
+
+  if (await getAdminUser(env, email)) return json({ error: "user already exists" }, 409);
+
+  const { token, row } = await createInvite(env, email, role, gate.auth.email);
+  await appendHistory(env, { type: "invite_created", email, role, invited_by: gate.auth.email || "admin_token" });
+
+  const invite_url = `${ADMIN_CONSOLE_ORIGIN}/admin/accept-invite?token=${token}`;
+
+  // Best-effort email send — a Resend failure must never fail the invite
+  // itself; invite_url is always returned so the operator can share it
+  // manually.
+  if (env.RESEND_API_KEY) {
+    try {
+      await fetch("https://api.resend.com/emails", {
+        method: "POST",
+        headers: {
+          "Authorization": `Bearer ${env.RESEND_API_KEY}`,
+          "Content-Type": "application/json",
+        },
+        body: JSON.stringify({
+          from: env.LAB_INVITE_FROM || "OneFlare Lab <onboarding@one-flare.com>",
+          to: [email],
+          subject: "You're invited to the OneFlare admin console",
+          html:
+            `<p>You've been invited to the OneFlare admin console as <strong>${role}</strong>.</p>` +
+            `<p><a href="${invite_url}">Accept your invite</a> to set your password.</p>` +
+            `<p>This link expires in 7 days.</p>`,
+        }),
+      });
+    } catch (err) {
+      console.error("Resend invite email failed:", err && err.message);
+    }
+  }
+
+  return json({ ok: true, invite_url, email, role, expires_at: row.expires_at });
+}
+
+async function handleAuthAcceptInvite(request, env) {
+  if (request.method !== "POST") return json({ error: "method not allowed" }, 405);
+  let body;
+  try {
+    body = await request.json();
+  } catch {
+    return json({ error: "invalid JSON body" }, 400);
+  }
+  const token = String((body && body.token) || "");
+  const password = String((body && body.password) || "");
+  if (!token) return json({ error: "token is required" }, 400);
+  if (password.length < 10) return json({ error: "password must be at least 10 characters" }, 400);
+
+  const invite = await getInvite(env, token);
+  if (!invite) return json({ error: "invalid or expired invite" }, 400);
+  if (isExpired(invite.expires_at)) {
+    await deleteInvite(env, token);
+    return json({ error: "invite has expired" }, 400);
+  }
+  if (await getAdminUser(env, invite.email)) {
+    await deleteInvite(env, token);
+    return json({ error: "user already exists" }, 409);
+  }
+
+  const { pass_salt, pass_hash, iterations } = await createPasswordHash(password);
+  const now = new Date().toISOString();
+  const user = { email: invite.email, role: invite.role, pass_salt, pass_hash, iterations, created_at: now, last_login: now };
+  await putAdminUser(env, user);
+  await deleteInvite(env, token);
+  await appendHistory(env, { type: "admin_user_created", email: user.email, role: user.role });
+
+  const { sid } = await createSession(env, user.email, user.role);
+  return withSessionCookie(json({ ok: true, email: user.email, role: user.role }), sid);
+}
+
+async function handleAuthUsers(request, env) {
+  const gate = await requireAuthGate(request, env, { allowViewer: true });
+  if (gate.error) return gate.error;
+
+  const users = await listAdminUsers(env);
+  const invites = await listInvites(env);
+  return json({
+    ok: true,
+    users: users
+      .map((u) => ({ email: u.email, role: u.role, created_at: u.created_at, last_login: u.last_login || null }))
+      .sort((a, b) => a.email.localeCompare(b.email)),
+    invites: invites
+      .filter((i) => !isExpired(i.expires_at))
+      .map((i) => ({ email: i.email, role: i.role, expires_at: i.expires_at }))
+      .sort((a, b) => a.email.localeCompare(b.email)),
+  });
+}
+
+async function handleAuthUserRole(request, env, rawEmail) {
+  const gate = await requireAuthGate(request, env);
+  if (gate.error) return gate.error;
+  if (request.method !== "POST") return json({ error: "method not allowed" }, 405);
+
+  let body;
+  try {
+    body = await request.json();
+  } catch {
+    return json({ error: "invalid JSON body" }, 400);
+  }
+  const role = body && (body.role === "admin" || body.role === "viewer") ? body.role : null;
+  if (!role) return json({ error: "role must be 'admin' or 'viewer'" }, 400);
+
+  const email = normEmail(decodeURIComponent(rawEmail || ""));
+  const user = await getAdminUser(env, email);
+  if (!user) return json({ error: "not found" }, 404);
+
+  if (user.role === "admin" && role !== "admin" && (await countAdmins(env)) <= 1) {
+    return json({ error: "cannot demote the last admin" }, 400);
+  }
+
+  user.role = role;
+  await putAdminUser(env, user);
+  await appendHistory(env, { type: "admin_role_changed", email, role, changed_by: gate.auth.email || "admin_token" });
+  return json({ ok: true, email, role });
+}
+
+async function handleAuthDeleteUser(request, env, rawEmail) {
+  const gate = await requireAuthGate(request, env);
+  if (gate.error) return gate.error;
+
+  const email = normEmail(decodeURIComponent(rawEmail || ""));
+  if (gate.auth.email && gate.auth.email === email) {
+    return json({ error: "cannot remove yourself" }, 400);
+  }
+
+  const user = await getAdminUser(env, email);
+  if (!user) return json({ error: "not found" }, 404);
+
+  if (user.role === "admin" && (await countAdmins(env)) <= 1) {
+    return json({ error: "cannot remove the last admin" }, 400);
+  }
+
+  await deleteAdminUser(env, email);
+  await appendHistory(env, { type: "admin_user_removed", email, removed_by: gate.auth.email || "admin_token" });
+  return json({ ok: true, email, deleted: true });
+}
+
+// Break-glass bootstrap: mints the FIRST admin invite (gated by ADMIN_TOKEN,
+// not a session — there are no sessions possible yet). Refuses once any
+// admin user exists; from then on invites happen in-app via /auth/invite.
+async function handleAuthBootstrap(request, env) {
+  if (request.method !== "POST") return json({ error: "method not allowed" }, 405);
+  if (!checkAdminToken(request, env)) return json({ error: "unauthorized" }, 401);
+
+  const users = await listAdminUsers(env);
+  if (users.length > 0) return json({ error: "admin users already exist — use /auth/invite" }, 409);
+
+  let body;
+  try {
+    body = await request.json();
+  } catch {
+    return json({ error: "invalid JSON body" }, 400);
+  }
+  const email = normEmail(body && body.email);
+  if (!email) return json({ error: "email is required" }, 400);
+
+  const { token, row } = await createInvite(env, email, "admin", "bootstrap");
+  await appendHistory(env, { type: "bootstrap_invite_created", email });
+
+  const invite_url = `${ADMIN_CONSOLE_ORIGIN}/admin/accept-invite?token=${token}`;
+  return json({ ok: true, invite_url, email, role: "admin", expires_at: row.expires_at });
 }
 
 // ── Router ─────────────────────────────────────────────────────────────────
@@ -505,6 +987,21 @@ export default {
 
     if (path === "/admin/registry" && request.method === "GET") return handleAdminRegistry(request, env);
     if (path === "/admin/history" && request.method === "GET") return handleAdminHistory(request, env);
+
+    // ── /auth/* — RBAC admin user-management ──────────────────────────────
+    if (path === "/auth/login" && request.method === "POST") return handleAuthLogin(request, env);
+    if (path === "/auth/logout" && request.method === "POST") return handleAuthLogout(request, env);
+    if (path === "/auth/me" && request.method === "GET") return handleAuthMe(request, env);
+    if (path === "/auth/invite" && request.method === "POST") return handleAuthInvite(request, env);
+    if (path === "/auth/accept-invite" && request.method === "POST") return handleAuthAcceptInvite(request, env);
+    if (path === "/auth/users" && request.method === "GET") return handleAuthUsers(request, env);
+    if (path === "/auth/bootstrap" && request.method === "POST") return handleAuthBootstrap(request, env);
+
+    const userRoleMatch = path.match(/^\/auth\/users\/([^/]+)\/role$/);
+    if (userRoleMatch && request.method === "POST") return handleAuthUserRole(request, env, userRoleMatch[1]);
+
+    const userDeleteAuthMatch = path.match(/^\/auth\/users\/([^/]+)$/);
+    if (userDeleteAuthMatch && request.method === "DELETE") return handleAuthDeleteUser(request, env, userDeleteAuthMatch[1]);
 
     return json({ error: "not found" }, 404);
   },

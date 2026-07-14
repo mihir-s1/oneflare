@@ -206,8 +206,9 @@ def reset_identity() -> None:
 
 # ── admin proxy (console deployment only) ───────────────────────────────────
 
-def admin_request(method: str, path: str) -> tuple[int, dict]:
-    """Proxy an /admin/* call to the relay using this console's ADMIN_TOKEN.
+def admin_request(method: str, path: str, json_body: Optional[dict] = None) -> tuple[int, dict]:
+    """Proxy an /admin/* (or ADMIN_TOKEN-gated /auth/*) call to the relay using
+    this console's ADMIN_TOKEN.
 
     Returns (status_code, json). Callers must have already checked admin_enabled().
     """
@@ -222,6 +223,7 @@ def admin_request(method: str, path: str) -> tuple[int, dict]:
             method,
             f"{base}{path}",
             headers={"Authorization": f"Bearer {token}"},
+            json=json_body,
             timeout=15,
         )
     except httpx.HTTPError as exc:
@@ -231,3 +233,49 @@ def admin_request(method: str, path: str) -> tuple[int, dict]:
     except ValueError:
         body = {"error": resp.text[:300]}
     return resp.status_code, body
+
+
+# ── RBAC auth proxy (cookie-forwarding, any deployment) ─────────────────────
+#
+# Unlike admin_request() (ADMIN_TOKEN, console-only break-glass), auth_request()
+# forwards the browser's own session cookie both ways: it reads the incoming
+# request's cookies and passes any Set-Cookie the relay returns (e.g. a fresh
+# session on login/accept-invite, or the cleared cookie on logout) back up to
+# the caller so it can be re-set on the browser-facing response. Available on
+# ANY lab-ui instance with RELAY_URL configured — the RBAC login layer is not
+# gated by ADMIN_TOKEN/admin_enabled().
+
+def auth_request(
+    method: str,
+    path: str,
+    cookies: Optional[dict] = None,
+    json_body: Optional[dict] = None,
+) -> tuple[int, dict, list[str]]:
+    """Proxy an /auth/* call to the relay, forwarding cookies both ways.
+
+    Returns (status_code, json_body, set_cookie_headers) — set_cookie_headers
+    is the raw list of `Set-Cookie` header values the relay returned (kept
+    intact, attributes and all, so HttpOnly/Secure/SameSite/Max-Age survive
+    the proxy hop) for the caller to re-append onto its own response.
+    """
+    base = _relay_base()
+    if not base:
+        return 503, {"error": "RELAY_URL not configured"}, []
+    import httpx
+
+    try:
+        resp = httpx.request(
+            method,
+            f"{base}{path}",
+            cookies=cookies or {},
+            json=json_body,
+            timeout=15,
+        )
+    except httpx.HTTPError as exc:
+        return 502, {"error": f"relay unreachable: {exc}"}, []
+    try:
+        body = resp.json()
+    except ValueError:
+        body = {"error": resp.text[:300]}
+    set_cookies = resp.headers.get_list("set-cookie") if hasattr(resp.headers, "get_list") else []
+    return resp.status_code, body, set_cookies
