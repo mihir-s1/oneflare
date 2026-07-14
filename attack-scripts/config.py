@@ -5,6 +5,19 @@ from dotenv import load_dotenv
 # Load .env.local from project root
 load_dotenv(Path(__file__).parent.parent / ".env.local")
 
+# TLS verification for outbound attack traffic. Lab traffic often traverses a
+# TLS-inspecting corporate proxy (Zscaler/Netskope/etc.) whose MITM cert the
+# container's Python doesn't trust → CERTIFICATE_VERIFY_FAILED. Attack sims don't
+# need cert validation, so default OFF (matches the campaign engine). A partner on
+# a clean network can set LAB_TLS_VERIFY=true for realism.
+TLS_VERIFY = os.getenv("LAB_TLS_VERIFY", "false").lower() in ("1", "true", "yes")
+if not TLS_VERIFY:
+    try:
+        import urllib3
+        urllib3.disable_warnings(urllib3.exceptions.InsecureRequestWarning)
+    except Exception:
+        pass
+
 # one-flare.com is the live attack surface (shop/portal/api.one-flare.com are
 # Cloudflare-proxied with WAF + Bot Management + Logpush → S1). Guard against an
 # empty env value (the backend may pass CLOUDFLARE_DOMAIN="") so URLs never

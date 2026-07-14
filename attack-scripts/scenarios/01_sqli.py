@@ -6,7 +6,7 @@ from pathlib import Path
 sys.path.insert(0, str(Path(__file__).parent.parent))
 
 import requests
-from config import SHOP_URL, LOGS_DIR
+from config import SHOP_URL, LOGS_DIR, TLS_VERIFY
 from utils import print_banner, print_request, jitter, random_headers, SessionLog
 
 PAYLOADS = [
@@ -54,7 +54,7 @@ def run() -> dict:
         url = f"{SHOP_URL}/search"
         params = {"q": payload}
         try:
-            r = requests.get(url, params=params, headers=random_headers(), timeout=10, allow_redirects=False)
+            r = requests.get(url, params=params, headers=random_headers(), timeout=10, allow_redirects=False, verify=TLS_VERIFY)
             note = "WAF block" if r.status_code == 403 else "passed WAF" if r.status_code == 200 else ""
             print_request("GET", f"{url}?q={payload[:40]}...", r.status_code, note)
             log.log("GET", url, r.status_code, payload, note)

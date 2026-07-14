@@ -23,7 +23,7 @@ from pathlib import Path
 sys.path.insert(0, str(Path(__file__).parent.parent))
 
 import requests
-from config import API_URL, LOGS_DIR
+from config import API_URL, LOGS_DIR, TLS_VERIFY
 from utils import print_banner, SessionLog
 from rich.console import Console
 
@@ -87,7 +87,7 @@ def run() -> dict:
         path = random.choice(BOT_PROBE_PATHS)
         url = f"{API_URL}{path}"
         try:
-            r = requests.get(url, headers={"User-Agent": ua, "Accept": "application/json"}, timeout=8)
+            r = requests.get(url, headers={"User-Agent": ua, "Accept": "application/json"}, timeout=8, verify=TLS_VERIFY)
             status = r.status_code
             if status in (403, 429):
                 console.print(f"  [red]BLOCKED[/red] {status}  {path}  [dim]{ua[:38]}[/dim]")

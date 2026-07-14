@@ -13,7 +13,7 @@ import dns.message
 import dns.query
 import dns.rdatatype
 import dns.resolver
-from config import LOGS_DIR, CF_GATEWAY_DOH_URL
+from config import LOGS_DIR, CF_GATEWAY_DOH_URL, TLS_VERIFY
 from utils import print_banner, SessionLog
 from rich.console import Console
 
@@ -51,6 +51,7 @@ def query_doh(fqdn: str, rdtype: str, doh_url: str) -> str:
             content=wire,
             headers={"content-type": "application/dns-message", "accept": "application/dns-message"},
             timeout=5,
+            verify=TLS_VERIFY,
         )
         r.raise_for_status()
         resp = dns.message.from_wire(r.content)

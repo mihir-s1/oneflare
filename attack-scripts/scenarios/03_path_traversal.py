@@ -5,7 +5,7 @@ from pathlib import Path
 sys.path.insert(0, str(Path(__file__).parent.parent))
 
 import requests
-from config import SHOP_URL, LOGS_DIR
+from config import SHOP_URL, LOGS_DIR, TLS_VERIFY
 from utils import print_banner, print_request, jitter, random_headers, SessionLog
 
 TRAVERSAL_PATHS = [
@@ -44,7 +44,7 @@ def run() -> dict:
     for path in TRAVERSAL_PATHS:
         url = f"{SHOP_URL}/products/{path}"
         try:
-            r = requests.get(url, headers=random_headers(), timeout=10, allow_redirects=False)
+            r = requests.get(url, headers=random_headers(), timeout=10, allow_redirects=False, verify=TLS_VERIFY)
             note = "WAF block" if r.status_code == 403 else "reached worker"
             print_request("GET", f"/products/{path[:40]}", r.status_code, note)
             log.log("GET", url, r.status_code, path, note)
@@ -61,7 +61,7 @@ def run() -> dict:
         url = f"{SHOP_URL}/search"
         try:
             r = requests.get(url, params={"q": payload, "file": payload},
-                             headers=random_headers(), timeout=10)
+                             headers=random_headers(), timeout=10, verify=TLS_VERIFY)
             note = "WAF block" if r.status_code == 403 else "reached worker"
             print_request("GET", f"/search?file={payload[:30]}", r.status_code, note)
             log.log("GET", url, r.status_code, payload, note)

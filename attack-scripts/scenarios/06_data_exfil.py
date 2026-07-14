@@ -5,7 +5,7 @@ from pathlib import Path
 sys.path.insert(0, str(Path(__file__).parent.parent))
 
 import requests
-from config import API_URL, API_USERNAME, API_PASSWORD, LOGS_DIR
+from config import API_URL, API_USERNAME, API_PASSWORD, LOGS_DIR, TLS_VERIFY
 from utils import print_banner, print_request, jitter, random_headers, SessionLog
 from rich.console import Console
 
@@ -31,7 +31,7 @@ def run() -> dict:
     try:
         r = requests.post(f"{API_URL}/api/v1/auth/login",
                           json={"username": API_USERNAME, "password": API_PASSWORD},
-                          headers=random_headers({"User-Agent": BROWSER_UA}), timeout=10)
+                          headers=random_headers({"User-Agent": BROWSER_UA}), timeout=10, verify=TLS_VERIFY)
         if r.status_code == 200:
             token = r.json().get("token")
             console.print(f"  [green]AUTH OK[/green] — token: {token}")
@@ -53,7 +53,7 @@ def run() -> dict:
     console.print("\n[yellow]Phase 2: API enumeration[/yellow]")
     for path in ["/api/v1/health", "/api/v1/customers?limit=5", "/api/v1/orders"]:
         try:
-            r = requests.get(f"{API_URL}{path}", headers=auth_headers, timeout=10)
+            r = requests.get(f"{API_URL}{path}", headers=auth_headers, timeout=10, verify=TLS_VERIFY)
             print_request("GET", path, r.status_code, f"{len(r.content)} bytes")
             log.log("GET", f"{API_URL}{path}", r.status_code, "", f"{len(r.content)} bytes")
             passed += 1 if r.status_code == 200 else 0
@@ -68,7 +68,7 @@ def run() -> dict:
         url = f"{API_URL}/api/v1/customers/export?format={fmt}"
         try:
             r = requests.get(url, headers=random_headers({"Authorization": f"Bearer {token}"}),
-                             timeout=30, stream=True)
+                             timeout=30, stream=True, verify=TLS_VERIFY)
             size = sum(len(chunk) for chunk in r.iter_content(8192))
             note = f"{size:,} bytes — {'WAF block' if r.status_code == 403 else 'exfil success'}"
             print_request("GET", f"/api/v1/customers/export?format={fmt}", r.status_code, note)

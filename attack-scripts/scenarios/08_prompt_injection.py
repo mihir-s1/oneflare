@@ -23,7 +23,7 @@ from pathlib import Path
 sys.path.insert(0, str(Path(__file__).parent.parent))
 
 import requests
-from config import API_URL, LOGS_DIR
+from config import API_URL, LOGS_DIR, TLS_VERIFY
 from utils import print_banner, SessionLog
 from rich.console import Console
 
@@ -77,6 +77,7 @@ def run() -> dict:
                 json={"prompt": payload, "model": "pyxis-chat-v2"},
                 headers={"User-Agent": ua, "Content-Type": "application/json"},
                 timeout=10,
+                verify=TLS_VERIFY,
             )
             status = r.status_code
             if status in (403, 429):
