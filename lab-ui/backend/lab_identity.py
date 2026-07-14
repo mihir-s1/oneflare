@@ -69,9 +69,20 @@ def _save_identity(data: dict) -> None:
 
 
 def apply_identity(shop_url: str) -> None:
-    """Point all shop-targeted attack traffic at this instance's subdomain."""
+    """Point ALL scenario traffic (shop/portal/api) at this instance's subdomain.
+
+    In the multi-tenant model every user has ONE host `<slug>.lab.soledrop.co`
+    served by the SoleDrop shop worker, so shop/portal/api collapse onto it. This
+    keeps all scenarios isolated to the user's site: Cloudflare WAF/Bot/AI scores
+    and LOGS every request (incl. 404s) with the attack markers in the query
+    string / UA, and detections key on those — not on the origin response — so
+    they still fire even where the shop worker doesn't serve that exact path.
+    (DNS tunneling is Gateway/DoH-based and account-level — not routed here.)"""
     if shop_url:
-        os.environ["SHOP_URL_OVERRIDE"] = shop_url.rstrip("/")
+        u = shop_url.rstrip("/")
+        os.environ["SHOP_URL_OVERRIDE"] = u
+        os.environ["PORTAL_URL_OVERRIDE"] = u
+        os.environ["API_URL_OVERRIDE"] = u
 
 
 def bootstrap() -> Optional[dict]:

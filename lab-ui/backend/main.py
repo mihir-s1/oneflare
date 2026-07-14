@@ -99,9 +99,18 @@ SERVER_CONFIG = build_server_config()
 # Re-apply a persisted lab identity at startup so this instance keeps targeting
 # its registered subdomain across restarts (and reflect it into the subprocess
 # scenario default so /ws/run uses it too).
+def _reflect_identity_urls(shop_url: str) -> None:
+    """Collapse shop/portal/api server defaults onto the registered subdomain so
+    the subprocess scenario runner (/ws/run) targets it for ALL scenarios."""
+    if shop_url:
+        SERVER_CONFIG["shop_url"] = shop_url
+        SERVER_CONFIG["portal_url"] = shop_url
+        SERVER_CONFIG["api_url"] = shop_url
+
+
 _BOOT_IDENTITY = _li.bootstrap()
 if _BOOT_IDENTITY and _BOOT_IDENTITY.get("shop_url"):
-    SERVER_CONFIG["shop_url"] = _BOOT_IDENTITY["shop_url"]
+    _reflect_identity_urls(_BOOT_IDENTITY["shop_url"])
 
 
 @app.get("/api/health")
@@ -336,7 +345,7 @@ def lab_register(body: LabRegisterRequest):
     except RuntimeError as exc:
         raise HTTPException(status_code=502, detail=str(exc))
     if ident.get("shop_url"):
-        SERVER_CONFIG["shop_url"] = ident["shop_url"]
+        _reflect_identity_urls(ident["shop_url"])
     return {"ok": True, "identity": ident}
 
 
