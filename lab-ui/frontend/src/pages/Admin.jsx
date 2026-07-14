@@ -38,7 +38,7 @@ function StatusBadge({ status }) {
 }
 
 // ── Tenants table ─────────────────────────────────────────────────────────────
-function TenantsTable({ registry, onToggle, onDelete, actionBusy }) {
+function TenantsTable({ registry, onToggle, onDelete, actionBusy, selected, onToggleSelect, onToggleSelectAll }) {
   if (registry.length === 0) {
     return (
       <div className="rounded-xl border border-[#2d1b4e] bg-[#1a0a2e]/50 p-12 flex flex-col items-center gap-4">
@@ -56,9 +56,16 @@ function TenantsTable({ registry, onToggle, onDelete, actionBusy }) {
   return (
     <div className="rounded-xl border border-[#2d1b4e] overflow-hidden">
       <div className="overflow-x-auto">
-        <div className="min-w-[820px]">
+        <div className="min-w-[880px]">
           {/* Table header */}
-          <div className="grid grid-cols-[1fr_1fr_auto_auto_auto_1.2fr_auto] gap-4 px-5 py-3 bg-[#1a0a2e] border-b border-[#2d1b4e] text-xs font-semibold text-slate-500 uppercase tracking-wider">
+          <div className="grid grid-cols-[auto_1fr_1fr_auto_auto_auto_1.2fr_auto] gap-4 px-5 py-3 bg-[#1a0a2e] border-b border-[#2d1b4e] text-xs font-semibold text-slate-500 uppercase tracking-wider items-center">
+            <input
+              type="checkbox"
+              checked={registry.length > 0 && selected.size === registry.length}
+              onChange={onToggleSelectAll}
+              className="accent-orange-500"
+              aria-label="Select all tenants"
+            />
             <span>Name</span>
             <span>Subdomain</span>
             <span>Status</span>
@@ -73,14 +80,24 @@ function TenantsTable({ registry, onToggle, onDelete, actionBusy }) {
             return (
               <div
                 key={entry.subdomain}
-                className="grid grid-cols-[1fr_1fr_auto_auto_auto_1.2fr_auto] gap-4 px-5 py-3.5 border-b border-[#1e1235] last:border-0 hover:bg-white/[0.02] transition-colors items-center"
+                className="grid grid-cols-[auto_1fr_1fr_auto_auto_auto_1.2fr_auto] gap-4 px-5 py-3.5 border-b border-[#1e1235] last:border-0 hover:bg-white/[0.02] transition-colors items-center"
               >
+                <input
+                  type="checkbox"
+                  checked={selected.has(entry.subdomain)}
+                  onChange={() => onToggleSelect(entry.subdomain)}
+                  className="accent-orange-500"
+                  aria-label={`Select ${entry.subdomain}`}
+                />
                 <span className="text-sm font-medium text-slate-200 truncate">{entry.name || '—'}</span>
                 <span className="text-xs font-mono text-purple-300 truncate">{entry.subdomain}</span>
                 <StatusBadge status={entry.status} />
                 <span className="text-xs font-mono text-slate-400">{entry.forwarded ?? 0}</span>
                 <span className="text-xs font-mono text-slate-500 whitespace-nowrap">{formatTime(entry.last_seen)}</span>
                 <div className="text-xs font-mono text-slate-400 truncate">
+                  {entry.site_label && (
+                    <div className="text-slate-300 truncate mb-0.5">{entry.site_label}</div>
+                  )}
                   <span className="text-slate-300">{entry.s1_hec_token || '****'}</span>
                   <span className="text-slate-600"> @ </span>
                   <span>{hecHost(entry.s1_hec_url)}</span>
@@ -172,6 +189,8 @@ export default function Admin() {
   const [activeTab, setActiveTab] = useState('tenants')
   const [refreshing, setRefreshing] = useState(false)
   const [actionBusy, setActionBusy] = useState(null)
+  const [selected, setSelected] = useState(() => new Set())
+  const [batchDeleting, setBatchDeleting] = useState(false)
 
   const loadRegistry = useCallback(async () => {
     try {
@@ -243,6 +262,41 @@ export default function Admin() {
       // best-effort
     } finally {
       setActionBusy(null)
+    }
+  }
+
+  function handleToggleSelect(subdomain) {
+    setSelected(prev => {
+      const next = new Set(prev)
+      if (next.has(subdomain)) next.delete(subdomain)
+      else next.add(subdomain)
+      return next
+    })
+  }
+
+  function handleToggleSelectAll() {
+    setSelected(prev =>
+      prev.size === registry.length ? new Set() : new Set(registry.map(e => e.subdomain))
+    )
+  }
+
+  async function handleBatchDelete() {
+    const subdomains = [...selected]
+    if (subdomains.length === 0) return
+    if (!window.confirm(`Tear down ${subdomains.length} selected tenant${subdomains.length !== 1 ? 's' : ''}? This stops routing their logs.`)) return
+    setBatchDeleting(true)
+    try {
+      await fetch('/api/admin/users/delete', {
+        method: 'POST',
+        headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify({ subdomains }),
+      })
+      setSelected(new Set())
+      await loadRegistry()
+    } catch (err) {
+      // best-effort — table refresh will reflect real state
+    } finally {
+      setBatchDeleting(false)
     }
   }
 
@@ -323,13 +377,28 @@ export default function Admin() {
             </button>
           </div>
 
-          <div className="pt-2">
+          <div className="pt-2 space-y-3">
+            {activeTab === 'tenants' && (
+              <div className="flex items-center justify-end">
+                <button
+                  onClick={handleBatchDelete}
+                  disabled={selected.size === 0 || batchDeleting}
+                  className="btn-ghost text-xs text-red-400 hover:text-red-300 hover:border-red-500/30 disabled:opacity-40"
+                >
+                  <Trash2 className="w-3.5 h-3.5" />
+                  {batchDeleting ? 'Deleting...' : `Delete selected (${selected.size})`}
+                </button>
+              </div>
+            )}
             {activeTab === 'tenants' ? (
               <TenantsTable
                 registry={registry}
                 onToggle={handleToggle}
                 onDelete={handleDelete}
                 actionBusy={actionBusy}
+                selected={selected}
+                onToggleSelect={handleToggleSelect}
+                onToggleSelectAll={handleToggleSelectAll}
               />
             ) : (
               <HistoryTable history={history} />

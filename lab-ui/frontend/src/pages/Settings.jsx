@@ -277,10 +277,12 @@ function LabIdentitySection({ serverConfig }) {
   const [name, setName] = useState(() => localStorage.getItem(LAB_NAME_KEY) || '')
   const [s1HecUrl, setS1HecUrl] = useState('')
   const [s1HecToken, setS1HecToken] = useState('')
+  const [siteLabel, setSiteLabel] = useState('')
   const [identity, setIdentity] = useState(null)
   const [loading, setLoading] = useState(true)
   const [registering, setRegistering] = useState(false)
   const [error, setError] = useState('')
+  const [resetNotice, setResetNotice] = useState('')
 
   const relayConfigured = serverConfig?.relay_configured ?? false
   const labDomain = serverConfig?.lab_domain || 'lab.soledrop.co'
@@ -291,10 +293,18 @@ function LabIdentitySection({ serverConfig }) {
       .then(r => (r.ok ? r.json() : null))
       .then(data => {
         if (!alive || !data) return
+        if (data.reset) {
+          setIdentity(null)
+          setResetNotice(data.message || 'This instance was reset by the admin — please register again.')
+          localStorage.removeItem(LAB_NAME_KEY)
+          localStorage.removeItem(LAB_SUBDOMAIN_KEY)
+          return
+        }
         if (data.identity) {
           setIdentity(data.identity)
           setName(data.identity.name || '')
           setS1HecUrl(data.identity.s1_hec_url || '')
+          setSiteLabel(data.identity.site_label || '')
           localStorage.setItem(LAB_NAME_KEY, data.identity.name || '')
           if (data.identity.subdomain) localStorage.setItem(LAB_SUBDOMAIN_KEY, data.identity.subdomain)
         }
@@ -312,7 +322,10 @@ function LabIdentitySection({ serverConfig }) {
       const res = await fetch('/api/lab/register', {
         method: 'POST',
         headers: { 'Content-Type': 'application/json' },
-        body: JSON.stringify({ name, s1_hec_url: s1HecUrl, s1_hec_token: s1HecToken }),
+        body: JSON.stringify({
+          name, s1_hec_url: s1HecUrl, s1_hec_token: s1HecToken,
+          site_label: siteLabel || undefined,
+        }),
       })
       const data = await res.json().catch(() => ({}))
       if (!res.ok) {
@@ -320,6 +333,7 @@ function LabIdentitySection({ serverConfig }) {
         return
       }
       setIdentity(data.identity)
+      setResetNotice('')
       setS1HecToken('')
       if (data.identity?.name) localStorage.setItem(LAB_NAME_KEY, data.identity.name)
       if (data.identity?.subdomain) localStorage.setItem(LAB_SUBDOMAIN_KEY, data.identity.subdomain)
@@ -338,6 +352,13 @@ function LabIdentitySection({ serverConfig }) {
           <span className="font-mono text-slate-300">&lt;name&gt;.{labDomain}</span> and routes its
           Cloudflare telemetry to <strong className="text-slate-200">your</strong> SentinelOne site.
         </p>
+
+        {resetNotice && (
+          <div className="rounded-lg border border-yellow-500/20 bg-yellow-500/5 p-3 flex gap-2 text-sm text-yellow-400">
+            <AlertTriangle className="w-4 h-4 shrink-0 mt-0.5" />
+            {resetNotice}
+          </div>
+        )}
 
         {identity && (
           <div className="rounded-lg border border-purple-500/20 bg-purple-500/5 p-3 flex items-center justify-between flex-wrap gap-2">
@@ -379,6 +400,14 @@ function LabIdentitySection({ serverConfig }) {
             showToggle
             placeholder="HEC write token from your SentinelOne console"
             note="Sent only to this backend on submit — never stored in your browser."
+          />
+          <Field
+            label="Site Label (optional)"
+            fieldKey="lab_site_label"
+            value={siteLabel}
+            onChange={(_, v) => setSiteLabel(v)}
+            placeholder="e.g. Alice's laptop — SOC demo"
+            note="Shown to the admin in the relay's tenant list for visibility only — not used for routing."
           />
 
           <div className="flex items-center gap-3 pt-1">

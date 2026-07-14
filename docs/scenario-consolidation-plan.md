@@ -81,8 +81,20 @@ this needs its source or a rewrite. Recommend: ship as-is now, treat fidelity as
    the worker is shared by the CTF (shop.soledrop.co) AND all lab subdomains (*.lab.soledrop.co).
 3. TLS toggle: env `LAB_TLS_VERIFY` (default false) — DONE in config.py.
 
+## Test results (2026-07-14) — everything functional
+- 6/8 scenarios fully functional vs amin.lab.soledrop.co (sqli/xss/traversal/cred/bot/promptinj):
+  exit 0, 0 SSL errors, 100s of requests. Pipeline proven (amin forwarded=688+).
+- Exfil (06): current worker → "AUTH FAILED 404"; on the FIDELITY worker → "AUTH OK" + bulk
+  /customers/export 544,659 B (csv) / 1,096,658 B (json). Fidelity fix validated end-to-end.
+- Fidelity worker: all 6 new/changed routes verified on a live throwaway deploy
+  (soledrop-shop-fidelity, torn down after); existing CTF routes + incident flip intact.
+- DNS (05): NOT a code bug — CF_GATEWAY_DOH_URL is the team URL (cloudflareaccess.com → 404);
+  needs the hex `<id>.cloudflare-gateway.com/dns-query`. Account-level/shared exception regardless.
+- **PR opened: github.com/mihir-s1/soledrop-worker/pull/1** (fork amin-hamidi-s1). Deploy to
+  shop-soledrop-worker (on OUR CF account) after merge → re-verify vs shop.soledrop.co + a lab subdomain.
+
 ## Execution order
-- [~] WS1 TLS unblock — config.TLS_VERIFY + verify= across the 8 scenarios (in progress).
+- [x] WS1 TLS unblock — config.TLS_VERIFY + verify= across the 8 scenarios. DONE + verified.
 - [ ] WS-Worker: pull shop-soledrop-worker source → repo → extend for full fidelity → test → redeploy.
 - [ ] WS2 relabel scenarios (frontend data/scenarios.js) → lab subdomain; mark 05 shared.
 - [ ] WS5 admin: batch-delete + visibility; deploy Admin on one-flare.com (ADMIN_TOKEN+RELAY_URL redeploy);

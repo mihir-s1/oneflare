@@ -95,7 +95,12 @@ def bootstrap() -> Optional[dict]:
 
 # ── registration (relay enrollment) ─────────────────────────────────────────
 
-def register(name: str, s1_hec_url: str, s1_hec_token: str) -> dict:
+def register(
+    name: str,
+    s1_hec_url: str,
+    s1_hec_token: str,
+    site_label: Optional[str] = None,
+) -> dict:
     """Enroll this instance. Returns the identity dict.
 
     Raises ValueError on bad input, RuntimeError on a relay rejection.
@@ -115,15 +120,18 @@ def register(name: str, s1_hec_url: str, s1_hec_token: str) -> dict:
         import httpx
 
         enroll_code = os.getenv("LAB_ENROLL_CODE", "")
+        payload = {
+            "name": name,
+            "s1_hec_url": s1_hec_url,
+            "s1_hec_token": s1_hec_token,
+        }
+        if site_label:
+            payload["site_label"] = site_label
         try:
             resp = httpx.post(
                 f"{base}/register",
                 headers={"X-Enroll-Code": enroll_code},
-                json={
-                    "name": name,
-                    "s1_hec_url": s1_hec_url,
-                    "s1_hec_token": s1_hec_token,
-                },
+                json=payload,
                 timeout=15,
             )
         except httpx.HTTPError as exc:
@@ -146,10 +154,54 @@ def register(name: str, s1_hec_url: str, s1_hec_token: str) -> dict:
         # NOTE: the S1 HEC token is sent to the relay but intentionally NOT
         # persisted on this instance — the relay is the system of record.
         "s1_hec_url": s1_hec_url,
+        "site_label": site_label or None,
     }
     _save_identity(ident)
     apply_identity(shop_url)
     return ident
+
+
+def check_still_registered(subdomain: str) -> Optional[bool]:
+    """Ask the relay whether `subdomain` still exists in its registry.
+
+    Returns True/False, or None if the check couldn't be made (no relay
+    configured, no enroll code, or the relay was unreachable) — callers must
+    treat None as "unknown, don't act on it" rather than "torn down".
+    """
+    base = _relay_base()
+    enroll_code = os.getenv("LAB_ENROLL_CODE", "")
+    if not base or not enroll_code or not subdomain:
+        return None
+
+    import httpx
+
+    try:
+        resp = httpx.get(
+            f"{base}/registered",
+            params={"subdomain": subdomain},
+            headers={"X-Enroll-Code": enroll_code},
+            timeout=10,
+        )
+    except httpx.HTTPError:
+        return None
+    if resp.status_code != 200:
+        return None
+    try:
+        data = resp.json()
+    except ValueError:
+        return None
+    return bool(data.get("exists"))
+
+
+def reset_identity() -> None:
+    """Delete the persisted identity file and clear the applied URL overrides
+    (back to the shop/portal/api defaults built from server config)."""
+    try:
+        IDENTITY_FILE.unlink()
+    except OSError:
+        pass
+    for key in ("SHOP_URL_OVERRIDE", "PORTAL_URL_OVERRIDE", "API_URL_OVERRIDE"):
+        os.environ.pop(key, None)
 
 
 # ── admin proxy (console deployment only) ───────────────────────────────────

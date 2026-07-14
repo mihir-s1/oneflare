@@ -14,6 +14,9 @@
 //                                            ping too — see handleIngest)
 //   POST   /register                      — self-service enrollment, gated by
 //                                            LAB_ENROLL_CODE
+//   GET    /registered?subdomain=<host>   — self-check "am I still registered?"
+//                                            (LAB_ENROLL_CODE) — used by an
+//                                            instance to detect a teardown
 //   GET    /admin/registry                — list all tenants (ADMIN_TOKEN)
 //   GET    /admin/history                 — audit/history log (ADMIN_TOKEN)
 //   POST   /admin/user/:subdomain/enable  — flip status -> active (ADMIN_TOKEN)
@@ -360,7 +363,7 @@ async function handleRegister(request, env) {
     return json({ error: "invalid or missing enroll code" }, 403);
   }
 
-  const { name, s1_hec_url, s1_hec_token } = body || {};
+  const { name, s1_hec_url, s1_hec_token, site_label } = body || {};
   if (!name || !s1_hec_url || !s1_hec_token) {
     return json({ error: "name, s1_hec_url, and s1_hec_token are all required" }, 400);
   }
@@ -372,6 +375,7 @@ async function handleRegister(request, env) {
 
   const host = `${slug}.${LAB_DOMAIN}`;
   const now = new Date().toISOString();
+  const label = site_label != null ? String(site_label).trim().slice(0, 200) || null : null;
 
   const existingRaw = await env.REGISTRY.get(host);
   let row;
@@ -382,12 +386,16 @@ async function handleRegister(request, env) {
     row.name = name;
     row.s1_hec_url = s1_hec_url;
     row.s1_hec_token = s1_hec_token;
+    // Only overwrite site_label when the caller actually supplied one — an
+    // idempotent re-register without a label shouldn't wipe an existing one.
+    if (label) row.site_label = label;
   } else {
     row = {
       name,
       subdomain: host,
       s1_hec_url,
       s1_hec_token,
+      site_label: label,
       status: "active",
       created_at: now,
       forwarded: 0,
@@ -399,6 +407,32 @@ async function handleRegister(request, env) {
   await appendHistory(env, { type: existingRaw ? "re-register" : "register", subdomain: host, name });
 
   return json({ ok: true, subdomain: host, shop_url: `https://${host}` });
+}
+
+// ── GET /registered — self-check, gated by LAB_ENROLL_CODE ───────────────────
+// Partner instances hold the enroll code, not the admin token. This lets an
+// instance ask "am I still in the registry?" so it can detect a teardown done
+// from the admin console and reset itself locally.
+
+async function handleRegistered(request, env) {
+  const url = new URL(request.url);
+  const subdomain = url.searchParams.get("subdomain") || "";
+  if (!checkEnrollCode(request, null, env)) {
+    return json({ error: "invalid or missing enroll code" }, 403);
+  }
+  if (!subdomain) return json({ error: "subdomain query param is required" }, 400);
+
+  const host = resolveHost(subdomain);
+  const raw = await env.REGISTRY.get(host);
+  if (!raw) return json({ exists: false, status: null });
+
+  let row;
+  try {
+    row = JSON.parse(raw);
+  } catch {
+    return json({ exists: false, status: null });
+  }
+  return json({ exists: true, status: row.status || null });
 }
 
 // ── /admin/* — gated by ADMIN_TOKEN ───────────────────────────────────────────
@@ -456,6 +490,7 @@ export default {
     if (path === "/health") return json({ status: "ok" });
     if (path === "/ingest") return handleIngest(request, env, ctx);
     if (path === "/register") return handleRegister(request, env);
+    if (path === "/registered" && request.method === "GET") return handleRegistered(request, env);
 
     const userActionMatch = path.match(/^\/admin\/user\/([^/]+)\/(enable|disable)$/);
     if (userActionMatch && request.method === "POST") {

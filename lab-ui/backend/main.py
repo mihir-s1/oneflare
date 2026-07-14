@@ -43,6 +43,11 @@ class LabRegisterRequest(BaseModel):
     name: str
     s1_hec_url: str
     s1_hec_token: str
+    site_label: Optional[str] = None
+
+
+class AdminBatchDeleteRequest(BaseModel):
+    subdomains: list[str]
 
 SCRIPTS_DIR = Path("/app/attack-scripts")
 
@@ -95,6 +100,14 @@ def build_server_config() -> dict:
 
 
 SERVER_CONFIG = build_server_config()
+# Snapshot of the un-overridden shop/portal/api defaults, taken before any lab
+# identity is applied — used to restore SERVER_CONFIG when an instance's
+# registration is torn down (see lab_get_identity's reset path below).
+_DEFAULT_TARGET_URLS = {
+    "shop_url": SERVER_CONFIG["shop_url"],
+    "portal_url": SERVER_CONFIG["portal_url"],
+    "api_url": SERVER_CONFIG["api_url"],
+}
 
 # Re-apply a persisted lab identity at startup so this instance keeps targeting
 # its registered subdomain across restarts (and reflect it into the subprocess
@@ -106,6 +119,13 @@ def _reflect_identity_urls(shop_url: str) -> None:
         SERVER_CONFIG["shop_url"] = shop_url
         SERVER_CONFIG["portal_url"] = shop_url
         SERVER_CONFIG["api_url"] = shop_url
+
+
+def _reset_target_urls() -> None:
+    """Restore SERVER_CONFIG shop/portal/api to their pre-identity defaults."""
+    SERVER_CONFIG["shop_url"] = _DEFAULT_TARGET_URLS["shop_url"]
+    SERVER_CONFIG["portal_url"] = _DEFAULT_TARGET_URLS["portal_url"]
+    SERVER_CONFIG["api_url"] = _DEFAULT_TARGET_URLS["api_url"]
 
 
 _BOOT_IDENTITY = _li.bootstrap()
@@ -321,10 +341,29 @@ async def campaign_clear_incident():
 # Multi-tenant lab identity (feat/multi-tenant-relay)
 # ---------------------------------------------------------------------------
 @app.get("/api/lab/identity")
-async def lab_get_identity():
-    """Current lab identity for this instance (or null if unregistered)."""
+def lab_get_identity():
+    """Current lab identity for this instance (or null if unregistered).
+
+    If a local identity exists but the relay no longer has it registered
+    (the admin tore it down from /admin/user/{subdomain}), reset this
+    instance back to an unregistered state and tell the caller so the UI can
+    surface it — sync def → the blocking relay check runs in a threadpool.
+    """
+    ident = _li.load_identity()
+    if ident and ident.get("subdomain"):
+        still_registered = _li.check_still_registered(ident["subdomain"])
+        if still_registered is False:
+            _li.reset_identity()
+            _reset_target_urls()
+            return {
+                "identity": None,
+                "reset": True,
+                "message": "This instance was reset by the admin — please register again.",
+                "relay_configured": bool(os.getenv("RELAY_URL")),
+                "lab_domain": os.getenv("LAB_DOMAIN", "lab.soledrop.co"),
+            }
     return {
-        "identity": _li.load_identity(),
+        "identity": ident,
         "relay_configured": bool(os.getenv("RELAY_URL")),
         "lab_domain": os.getenv("LAB_DOMAIN", "lab.soledrop.co"),
     }
@@ -339,7 +378,7 @@ def lab_register(body: LabRegisterRequest):
     a threadpool. 400 = bad input, 502 = relay unreachable/rejected.
     """
     try:
-        ident = _li.register(body.name, body.s1_hec_url, body.s1_hec_token)
+        ident = _li.register(body.name, body.s1_hec_url, body.s1_hec_token, body.site_label)
     except ValueError as exc:
         raise HTTPException(status_code=400, detail=str(exc))
     except RuntimeError as exc:
@@ -386,3 +425,18 @@ def admin_user_delete(subdomain: str):
     _require_admin()
     status, body = _li.admin_request("DELETE", f"/admin/user/{subdomain}")
     return JSONResponse(status_code=status, content=body)
+
+
+@app.post("/api/admin/users/delete")
+def admin_users_delete(body: AdminBatchDeleteRequest):
+    """Batch teardown — deletes each subdomain's relay registry row in turn.
+
+    Best-effort per-row: one failure doesn't stop the rest. Response:
+    {ok, results: [{subdomain, status}]}.
+    """
+    _require_admin()
+    results = []
+    for subdomain in body.subdomains:
+        status, _ = _li.admin_request("DELETE", f"/admin/user/{subdomain}")
+        results.append({"subdomain": subdomain, "status": status})
+    return {"ok": True, "results": results}
