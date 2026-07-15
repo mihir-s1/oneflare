@@ -189,9 +189,9 @@ function ConfigForm({
       <div className="rounded-lg border border-[#2d1b4e] bg-white/[0.02] p-3 flex gap-2.5">
         <Info className="w-4 h-4 text-orange-400 shrink-0 mt-0.5" />
         <p className="text-xs text-slate-400 leading-relaxed">
-          In your SentinelOne console: your user menu → <strong className="text-slate-300">My User → API Token → Generate/Regenerate</strong>.
-          Use a personal user token (not a service token) so Hyperautomation workflows import under your account.
-          The token is stored securely server-side and is never shown back to you or anyone else.
+          In your SentinelOne console: <strong className="text-slate-300">Settings → Users → Service Users → Create New Service User</strong> (or pick an existing one),
+          give it a role with <strong className="text-slate-300">Cloud Detection</strong> and <strong className="text-slate-300">Hyperautomation</strong> permissions scoped to your site, then copy its API token.
+          A scoped service-user token is recommended over a personal one. The token is stored securely server-side and is never shown back to you or anyone else.
         </p>
       </div>
 
