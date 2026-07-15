@@ -2,10 +2,13 @@ import { useState, useEffect } from 'react'
 import {
   ArrowRight, Server, Shield, Database, Globe, Cpu, AlertCircle,
   ChevronDown, ChevronUp, Copy, Check, Info, FileCode, Download, CheckCircle,
+  LayoutDashboard,
 } from 'lucide-react'
 import { SCENARIOS } from '../data/scenarios.js'
 import Badge from '../components/Badge.jsx'
 import { getMe, dnsAllowed } from '../lib/session.js'
+import threatDetectionDashboard from '../data/dashboards/threat-detection.dashboard.json'
+import ingestionInventoryDashboard from '../data/dashboards/ingestion-inventory.dashboard.json'
 
 // ── Detections inner content ────────────────────────────────────────────────
 
@@ -366,6 +369,160 @@ function ParsersContent() {
   )
 }
 
+// ── Dashboards inner content ────────────────────────────────────────────────
+
+const DASHBOARD_CARDS = [
+  {
+    id: 'threat-detection',
+    importPath: '/dashboards/threat-detection',
+    title: 'Cloudflare Threat Detection',
+    data: threatDetectionDashboard,
+    description: threatDetectionDashboard.description,
+    duration: threatDetectionDashboard.duration,
+    tabs: [
+      { name: 'Threat Overview', summary: 'KPI row (requests, WAF blocks, likely attacks, attacker IPs, DNS queries, countries), requests-over-time by response class, attack-type donut, top attacker IPs / countries, WAF-block detail.' },
+      { name: 'Web App Attacks (WAF)', summary: 'SQLi / XSS / traversal-RCE tables ranked by WAF ML score, attacked-hosts donut. Flags near-certain attacks (score ≤ 20), including ones that returned 200.' },
+      { name: 'Credential Attacks', summary: '/login attempts over time by status, failed-login KPIs, failed-logins-by-source-IP — credential stuffing / brute force surfaced via 401/403/429.' },
+      { name: 'DNS & C2 (Gateway)', summary: 'Query volume, query-type donut, and the tunneling/DGA signal — query names whose leftmost label exceeds 25 chars.' },
+      { name: 'Exfil, Bots & AI', summary: 'Bulk /export volume + response bytes, top API data pulls, the polymorphic-bot tell (one source IP, many User-Agents), and prompt-injection POSTs to /api/v1/chat.' },
+    ],
+  },
+  {
+    id: 'ingestion-inventory',
+    importPath: '/dashboards/cloudflare-ingestion-inventory',
+    title: 'Data Ingestion Inventory',
+    data: ingestionInventoryDashboard,
+    description: ingestionInventoryDashboard.description,
+    duration: ingestionInventoryDashboard.duration,
+    tabs: [
+      { name: 'Ingestion Inventory', summary: 'One row per Data Source × Logpush dataset × OCSF class landing in the SDL — vendor, dataset, OCSF class + UID, parser, event count, first/last seen, sorted by volume. Confirms every Cloudflare Logpush source is arriving and correctly parsed to OCSF.' },
+    ],
+  },
+]
+
+function DashboardCard({ card }) {
+  const [codeOpen, setCodeOpen] = useState(false)
+  const [copied, setCopied] = useState(false)
+  const pretty = JSON.stringify(card.data, null, 2)
+
+  function copyJson() {
+    navigator.clipboard.writeText(pretty).then(() => {
+      setCopied(true)
+      setTimeout(() => setCopied(false), 2000)
+    })
+  }
+
+  return (
+    <div className="rounded-2xl border border-white/10 bg-white/3 overflow-hidden">
+      <div className="p-5 border-b border-white/5">
+        <div className="flex items-start justify-between gap-4 flex-wrap">
+          <div className="flex items-start gap-4">
+            <div className="w-10 h-10 rounded-xl bg-purple-500/10 border border-purple-500/20 flex items-center justify-center shrink-0">
+              <LayoutDashboard className="w-5 h-5 text-purple-400" />
+            </div>
+            <div>
+              <h3 className="text-base font-bold text-slate-100">{card.title}</h3>
+              <p className="text-xs text-slate-400 mt-0.5 font-mono">
+                SDL Dashboard · {card.duration} window · {card.tabs.length} tab{card.tabs.length > 1 ? 's' : ''}
+              </p>
+            </div>
+          </div>
+        </div>
+        <p className="text-sm text-slate-300 leading-relaxed mt-3">{card.description}</p>
+      </div>
+
+      {/* What it shows */}
+      <div className="p-5 border-b border-white/5 space-y-2.5">
+        <span className="text-xs font-semibold text-slate-400 uppercase tracking-wider">What it shows</span>
+        <ul className="space-y-2">
+          {card.tabs.map(tab => (
+            <li key={tab.name} className="flex gap-2.5 items-start text-xs">
+              <span className="shrink-0 mt-0.5 px-1.5 py-0.5 rounded bg-purple-500/10 border border-purple-500/20 text-purple-300 font-semibold whitespace-nowrap">
+                {tab.name}
+              </span>
+              <span className="text-slate-400 leading-relaxed">{tab.summary}</span>
+            </li>
+          ))}
+        </ul>
+      </div>
+
+      {/* How to import */}
+      <div className="px-5 py-3 bg-blue-500/5 border-b border-blue-500/10 flex gap-2 text-xs text-slate-400">
+        <Info className="w-4 h-4 text-blue-400 shrink-0 mt-0.5" />
+        <span>
+          <strong className="text-slate-300">How to import:</strong> SentinelOne console →{' '}
+          <span className="text-slate-300">Dashboards → Import Dashboard</span>, paste the JSON below. Or deploy
+          directly via the SDL API: <span className="font-mono text-slate-300">sdl_put_file</span> to{' '}
+          <span className="font-mono text-slate-300">{card.importPath}</span>.
+        </span>
+      </div>
+
+      {/* Collapsible JSON panel */}
+      <div className="p-5">
+        <div
+          className="collapsible-header !p-3 !rounded-lg border border-[#2d1b4e]"
+          onClick={() => setCodeOpen(o => !o)}
+          role="button"
+          tabIndex={0}
+          onKeyDown={e => e.key === 'Enter' && setCodeOpen(o => !o)}
+          aria-expanded={codeOpen}
+        >
+          <span className="text-sm font-semibold text-slate-200 flex items-center gap-2">
+            <FileCode className="w-4 h-4 text-orange-400" />
+            {card.id}.dashboard.json
+          </span>
+          {codeOpen ? <ChevronUp className="w-4 h-4 text-slate-400" /> : <ChevronDown className="w-4 h-4 text-slate-400" />}
+        </div>
+
+        {codeOpen && (
+          <div className="relative mt-2">
+            <div className="flex items-center justify-between mb-2">
+              <span className="text-xs font-semibold text-slate-400 uppercase tracking-wider">Dashboard JSON</span>
+              <button
+                onClick={copyJson}
+                className={`flex items-center gap-1.5 text-xs px-2.5 py-1 rounded-lg border transition-all ${
+                  copied
+                    ? 'border-green-500/30 bg-green-500/10 text-green-400'
+                    : 'border-white/10 bg-white/5 text-slate-400 hover:text-slate-200 hover:bg-white/10'
+                }`}
+              >
+                {copied ? <CheckCircle className="w-3 h-3" /> : <Copy className="w-3 h-3" />}
+                {copied ? 'Copied!' : 'Copy'}
+              </button>
+            </div>
+            <pre className="terminal-scroll bg-black/40 border border-white/5 rounded-xl p-4 text-xs font-mono text-slate-300 overflow-auto max-h-[500px] leading-relaxed">
+              {pretty}
+            </pre>
+          </div>
+        )}
+      </div>
+    </div>
+  )
+}
+
+function DashboardsContent() {
+  return (
+    <div className="space-y-4">
+      <div className="rounded-xl border border-blue-500/20 bg-blue-500/5 p-4 flex gap-3">
+        <Info className="w-5 h-5 text-blue-400 shrink-0 mt-0.5" />
+        <div>
+          <p className="text-sm font-semibold text-blue-300 mb-1">SentinelOne SDL Dashboards</p>
+          <p className="text-sm text-slate-400 leading-relaxed">
+            Ready-to-import Singularity Data Lake dashboards, built against the Cloudflare Logpush feed already
+            parsed to OCSF in the SDL. Every panel is a live PowerQuery — no synthetic values.
+          </p>
+        </div>
+      </div>
+
+      <div className="grid grid-cols-1 xl:grid-cols-2 gap-4 items-start">
+        {DASHBOARD_CARDS.map(card => (
+          <DashboardCard key={card.id} card={card} />
+        ))}
+      </div>
+    </div>
+  )
+}
+
 // ── Architecture page ────────────────────────────────────────────────────────
 
 const WORKERS = [
@@ -639,6 +796,11 @@ export default function Architecture() {
       {/* Parsers collapsible */}
       <ArchCollapsible title="Parsers — OCSF Ingest Configs" icon={FileCode}>
         <ParsersContent />
+      </ArchCollapsible>
+
+      {/* Dashboards collapsible */}
+      <ArchCollapsible title="Dashboards — SDL Console Imports" icon={LayoutDashboard}>
+        <DashboardsContent />
       </ArchCollapsible>
     </div>
   )

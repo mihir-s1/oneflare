@@ -1,0 +1,19 @@
+{
+  "duration": "24h",
+  "description": "Cloudflare data ingestion inventory - what is flowing into the SDL, by Logpush dataset and OCSF class.",
+  "graphs": [
+    {
+      "title": "Cloudflare Data Ingestion Inventory",
+      "graphStyle": "markdown",
+      "markdown": "One row per **Data Source x Logpush dataset x OCSF class** landing in the SDL for the selected time range. Use it to confirm every Cloudflare Logpush source is arriving and being parsed to OCSF. New datasets (HTTP Requests, Firewall Events, Access) appear automatically - no filter is hardcoded. **Events = 0 rows** means nothing arrived in the window; widen the time picker before assuming an ingestion outage.",
+      "layout": { "w": 60, "h": 4, "x": 0, "y": 0 }
+    },
+    {
+      "title": "Cloudflare Data Ingestion Inventory (by dataset + OCSF class)",
+      "graphStyle": "table",
+      "showBarsColumn": "true",
+      "query": "dataSource.vendor = \"Cloudflare\"\n| group events = count(), first_ns = min(timestamp), last_ns = max(timestamp), parser = any(unmapped.parser) by vendor = dataSource.vendor, dataset = dataSource.cloudflare_dataset, ocsf_class = class_name, class_uid\n| let first_seen = simpledateformat(first_ns, 'yyyy-MM-dd HH:mm:ss z'), last_seen = simpledateformat(last_ns, 'yyyy-MM-dd HH:mm:ss z')\n| sort -events\n| columns \"Data Source\" = vendor, \"Logpush Dataset\" = dataset, \"OCSF Class\" = ocsf_class, \"Class UID\" = class_uid, \"Parser\" = parser, \"Events\" = events, \"First Seen\" = first_seen, \"Last Seen\" = last_seen",
+      "layout": { "w": 60, "h": 22, "x": 0, "y": 4 }
+    }
+  ]
+}
