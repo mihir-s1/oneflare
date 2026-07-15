@@ -1,6 +1,12 @@
-import { useState } from 'react'
+import { useState, useEffect } from 'react'
 import { useSearchParams, useNavigate } from 'react-router-dom'
 import { KeyRound, CheckCircle, AlertTriangle } from 'lucide-react'
+
+const ROLE_LABELS = {
+  user: 'ThreatOps User',
+  admin: 'Admin',
+  viewer: 'Viewer',
+}
 
 // Accept-invite: reached via the link returned by POST /auth/invite (or
 // /auth/bootstrap for the very first admin) — https://one-flare.com/admin/accept-invite?token=...
@@ -19,6 +25,32 @@ export default function AcceptInvite() {
   const [busy, setBusy] = useState(false)
   const [error, setError] = useState('')
   const [done, setDone] = useState(false)
+
+  // Invite lookup — drives role-aware heading copy ("Set up your ThreatOps
+  // User password" vs Admin/Viewer) and shows the invited email as context.
+  const [invite, setInvite] = useState(null)      // { email, role, expires_at }
+  const [inviteError, setInviteError] = useState('')
+  const [inviteLoaded, setInviteLoaded] = useState(false)
+
+  useEffect(() => {
+    if (!token) { setInviteLoaded(true); return }
+    let alive = true
+    fetch(`/api/auth/invite-info?token=${encodeURIComponent(token)}`)
+      .then(async (res) => {
+        const data = await res.json().catch(() => ({}))
+        if (!alive) return
+        if (!res.ok) {
+          setInviteError(data.error || 'This invite is invalid or expired.')
+        } else {
+          setInvite(data)
+        }
+      })
+      .catch(() => { if (alive) setInviteError('This invite is invalid or expired.') })
+      .finally(() => { if (alive) setInviteLoaded(true) })
+    return () => { alive = false }
+  }, [token])
+
+  const roleLabel = ROLE_LABELS[invite?.role] || 'account'
 
   async function handleSubmit(e) {
     e.preventDefault()
@@ -75,14 +107,24 @@ export default function AcceptInvite() {
         <KeyRound className="w-6 h-6 text-orange-400" />
       </div>
       <div className="text-center">
-        <p className="text-slate-100 font-semibold">Set your admin password</p>
-        <p className="text-sm text-slate-500 mt-1">Finish setting up your OneFlare admin console account.</p>
+        <p className="text-slate-100 font-semibold">Set up your {roleLabel} password</p>
+        <p className="text-sm text-slate-500 mt-1">Finish setting up your OneFlare console account.</p>
+        {invite?.email && (
+          <p className="text-xs text-slate-600 mt-2 font-mono">{invite.email}</p>
+        )}
       </div>
 
       {!token && (
         <div className="w-full rounded-lg border border-yellow-500/20 bg-yellow-500/5 p-3 flex gap-2 text-xs text-yellow-400">
           <AlertTriangle className="w-4 h-4 shrink-0 mt-0.5" />
           No invite token found in the URL — open the link from your invite email.
+        </div>
+      )}
+
+      {token && inviteLoaded && inviteError && (
+        <div className="w-full rounded-lg border border-red-500/20 bg-red-500/5 p-3 flex gap-2 text-xs text-red-400">
+          <AlertTriangle className="w-4 h-4 shrink-0 mt-0.5" />
+          {inviteError}
         </div>
       )}
 
@@ -112,7 +154,7 @@ export default function AcceptInvite() {
           />
         </div>
         {error && <p className="text-xs text-red-400">{error}</p>}
-        <button type="submit" disabled={busy || !token} className="btn-primary w-full text-sm justify-center disabled:opacity-40">
+        <button type="submit" disabled={busy || !token || !!inviteError} className="btn-primary w-full text-sm justify-center disabled:opacity-40">
           {busy ? 'Creating account...' : 'Set password & sign in'}
         </button>
       </form>

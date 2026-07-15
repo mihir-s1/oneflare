@@ -2,7 +2,7 @@ import { useState, useEffect } from 'react'
 import {
   ChevronDown, ChevronUp, Shield, Globe, Eye, EyeOff,
   CheckCircle, XCircle, Download, Upload, Info, Zap, AlertTriangle,
-  History as HistoryIcon, Trash2, Clock, X, Fingerprint, Target,
+  History as HistoryIcon, Trash2, Clock, X, Fingerprint, Target, LogOut,
 } from 'lucide-react'
 import Badge from '../components/Badge.jsx'
 import { SCENARIOS } from '../data/scenarios.js'
@@ -394,12 +394,12 @@ function LabIdentitySection({ serverConfig }) {
 
         <form onSubmit={handleRegister} className="space-y-4">
           <Field
-            label="Subdomain"
+            label="Name"
             fieldKey="lab_name"
             value={name}
             onChange={(_, v) => setName(v)}
             placeholder="e.g. alice"
-            note="Letters, numbers, and hyphens only — becomes your lab subdomain (<name>.lab.soledrop.co)."
+            note="Becomes your lab subdomain <name>.lab.soledrop.co — letters, numbers, and hyphens only."
           />
           <Field
             label="SentinelOne Region"
@@ -407,7 +407,7 @@ function LabIdentitySection({ serverConfig }) {
             value={s1Region}
             onChange={(_, v) => setS1Region(v)}
             placeholder="us1"
-            note={`Your SDL ingest region (default us1). Full ingest URL: ${buildHecUrl(s1Region)}`}
+            note={`The Singularity Data Lake region your HEC endpoint lives in (e.g. us1, eu1, apse2) — default us1; change only if your tenant is elsewhere. Full ingest URL: ${buildHecUrl(s1Region)}`}
           />
           <Field
             label="S1 HEC Write Token"
@@ -416,7 +416,7 @@ function LabIdentitySection({ serverConfig }) {
             onChange={(_, v) => setS1HecToken(v)}
             showToggle
             placeholder="HEC write token from your SentinelOne console"
-            note="Sent only to this backend on submit — never stored in your browser."
+            note="A SentinelOne HEC (HTTP Event Collector) ingest token from your console's Singularity Data Lake / AI-SIEM ingest config (e.g. the Cloudflare Marketplace integration or SDL settings) — write-only, sent only to this backend on submit, never stored in your browser."
           />
           <Field
             label="S1 Site"
@@ -424,7 +424,7 @@ function LabIdentitySection({ serverConfig }) {
             value={siteLabel}
             onChange={(_, v) => setSiteLabel(v)}
             placeholder="e.g. Amin Hamidi"
-            note="Required. The SentinelOne site this instance's logs land in — named in the admin tenant list (display only, not used for routing)."
+            note="The SentinelOne Site (under your Account) this lab's telemetry should land in — find it in the console scope selector (Settings → Sites). Display only, not used for routing."
           />
           <Field
             label="S1 Account"
@@ -432,15 +432,15 @@ function LabIdentitySection({ serverConfig }) {
             value={accountLabel}
             onChange={(_, v) => setAccountLabel(v)}
             placeholder="e.g. SentinelOne"
-            note="Required. The SentinelOne account that owns the site."
+            note="The SentinelOne Account that owns the Site — the top-level scope in your console."
           />
           <Field
-            label="S1 Console URL (optional)"
+            label="S1 Console URL"
             fieldKey="lab_s1_console_url"
             value={s1ConsoleUrl}
             onChange={(_, v) => setS1ConsoleUrl(v)}
             placeholder="e.g. https://usea1-<console>.sentinelone.net"
-            note="Optional. Your SentinelOne console domain — shown as the destination host in the admin list. Falls back to the ingest host if blank."
+            note="Your SentinelOne management console URL — shown as the destination host in the admin tenant list. Falls back to the ingest host if blank."
           />
 
           <div className="flex items-center gap-3 pt-1">
@@ -480,6 +480,20 @@ function LabIdentitySection({ serverConfig }) {
             )
           )}
         </form>
+
+        <div className="pt-2 border-t border-white/5 flex justify-end">
+          <button
+            type="button"
+            onClick={async () => {
+              await fetch('/api/auth/logout', { method: 'POST' })
+              window.location.href = '/'
+            }}
+            className="btn-ghost text-xs"
+          >
+            <LogOut className="w-3.5 h-3.5" />
+            Sign out
+          </button>
+        </div>
       </div>
     </Section>
   )

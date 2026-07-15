@@ -1,81 +1,65 @@
 import { useState, useEffect } from 'react'
 import { useNavigate } from 'react-router-dom'
-import { ExternalLink, Zap, Target, AlertTriangle } from 'lucide-react'
+import { AlertTriangle, ChevronRight, Layers } from 'lucide-react'
 import ScenarioCard from '../components/ScenarioCard.jsx'
+import Badge from '../components/Badge.jsx'
 import { SCENARIOS } from '../data/scenarios.js'
+import { getMe, dnsAllowed } from '../lib/session.js'
 
-// Industry campaign → badge label
-function getCampaignBadge(c) {
-  if (c.key === 'ctf') {
-    const phases = c.phases?.length || 4
-    return { text: `CTF · ${phases} BOXES`, className: 'border-[#b22222]/40 bg-[#7c2d12]/10 text-[#e57373]' }
-  }
-  const phases = c.phases?.length || c.num_phases || 5
-  return { text: `LIVE DRIP · ${phases} PHASES`, className: 'border-orange-500/30 bg-orange-500/10 text-orange-400' }
-}
-
-// Campaign card for the Campaigns section — wide banner style
+// Campaign card — same visual language as ScenarioCard so the two shelves
+// of the library read as one cohesive set.
 function CampaignCard({ campaign, onOpen }) {
-  const badge = getCampaignBadge(campaign)
   const isCTF = campaign.key === 'ctf'
-  const accentColor = isCTF ? '#b22222' : '#f38020'
-  const borderHover = isCTF
-    ? 'hover:border-[#b22222]/50 hover:shadow-[0_0_0_1px_rgba(178,34,34,0.15),0_4px_24px_rgba(178,34,34,0.12)]'
-    : 'hover:border-orange-500/40 hover:shadow-[0_0_0_1px_rgba(243,128,32,0.15),0_4px_24px_rgba(243,128,32,0.12)]'
+  const phases = campaign.phases?.length || campaign.num_phases || (isCTF ? 4 : 5)
+  const phaseLabel = isCTF ? `${phases} boxes` : `${phases} phases`
 
   return (
     <div
-      className={`
-        rounded-xl border border-[#2d1b4e] bg-[#1a0a2e] p-5 flex gap-4 items-start
-        transition-all duration-200 hover:-translate-y-px ${borderHover}
-      `}
+      role="button"
+      tabIndex={0}
+      onClick={() => onOpen(campaign)}
+      onKeyDown={(e) => e.key === 'Enter' && onOpen(campaign)}
+      className="
+        relative rounded-xl p-5 cursor-pointer outline-none focus-visible:ring-2 focus-visible:ring-amber-500/50
+        bg-[#1a0a2e] border border-[#2d1b4e] flex flex-col gap-3
+        hover:border-amber-500/40 hover:shadow-[0_0_0_1px_rgba(245,158,11,0.2),0_4px_24px_rgba(245,158,11,0.12)]
+        transition-all duration-300 hover:-translate-y-0.5
+      "
+      style={{ minHeight: '220px' }}
     >
-      {/* Icon */}
-      <div
-        className="w-12 h-12 rounded-xl flex items-center justify-center text-2xl shrink-0 border"
-        style={{ backgroundColor: `${accentColor}14`, borderColor: `${accentColor}30` }}
-      >
-        {campaign.icon || '🎯'}
+      {/* Top row */}
+      <div className="flex items-start justify-between gap-2">
+        <div className="flex items-center gap-2.5">
+          <span className="inline-flex items-center justify-center w-8 h-8 rounded-lg text-base border bg-amber-500/10 border-amber-500/20 text-amber-400">
+            {campaign.icon || <Layers className="w-4 h-4" />}
+          </span>
+          <Badge type="category" value="Campaign" />
+        </div>
+        <span className="inline-flex items-center rounded-full font-semibold font-mono tracking-wide px-2 py-0.5 text-xs bg-amber-500/15 text-amber-400 border border-amber-500/30">
+          {phaseLabel}
+        </span>
       </div>
 
-      {/* Content */}
-      <div className="flex-1 min-w-0">
-        <div className="flex items-start gap-3 flex-wrap mb-1">
-          <span
-            className={`text-[10px] font-mono font-bold uppercase tracking-widest px-2 py-0.5 rounded border ${badge.className}`}
-          >
-            {badge.text}
-          </span>
-          {campaign.campaign && (
-            <span className="text-[10px] font-mono text-slate-600 uppercase tracking-wider">
-              {campaign.campaign}
-            </span>
-          )}
-        </div>
-        <h3 className="text-base font-bold text-slate-100 leading-snug mb-1">
+      {/* Title + description */}
+      <div className="flex-1">
+        <h3 className="text-slate-100 font-semibold text-base leading-snug mb-1.5">
           {campaign.name}
         </h3>
-        <p className="text-sm text-slate-400 leading-relaxed line-clamp-2">
+        <p className="text-slate-400 text-sm leading-relaxed line-clamp-2">
           {campaign.description}
         </p>
       </div>
 
-      {/* CTA */}
-      <button
-        onClick={() => onOpen(campaign)}
-        className={`
-          shrink-0 flex items-center gap-1.5 px-4 py-2 rounded-lg text-sm font-semibold transition-all duration-200
-          border hover:-translate-y-px
-          ${isCTF
-            ? 'border-[#b22222]/40 text-[#e57373] bg-[#7c2d12]/10 hover:bg-[#7c2d12]/20'
-            : 'border-orange-500/40 text-orange-400 bg-orange-500/10 hover:bg-orange-500/20'
-          }
-        `}
-        aria-label={`Open ${campaign.name} full console`}
-      >
-        Open Full Console
-        <ExternalLink className="w-3.5 h-3.5" />
-      </button>
+      {/* Footer */}
+      <div className="flex items-center justify-between pt-2 border-t border-white/5">
+        <span className="text-xs text-slate-500 font-mono truncate max-w-[60%]" title={campaign.target || 'SoleDrop shop'}>
+          {campaign.target || 'SoleDrop shop'}
+        </span>
+        <span className="flex items-center gap-1 text-xs font-semibold text-amber-400">
+          Open console
+          <ChevronRight className="w-3.5 h-3.5" />
+        </span>
+      </div>
     </div>
   )
 }
@@ -99,6 +83,7 @@ export default function Scenarios() {
   const navigate = useNavigate()
   const [campaigns, setCampaigns] = useState([])
   const [loadingCampaigns, setLoadingCampaigns] = useState(true)
+  const [allowDns, setAllowDns] = useState(false)
 
   useEffect(() => {
     fetch('/api/campaigns')
@@ -114,6 +99,19 @@ export default function Scenarios() {
       .catch(() => setCampaigns([]))
       .finally(() => setLoadingCampaigns(false))
   }, [])
+
+  // DNS uses account-level Gateway (shared, not per-tenant) — only show it
+  // to an admin on the default console.
+  useEffect(() => {
+    let alive = true
+    Promise.all([getMe(), fetch('/api/config').then(r => (r.ok ? r.json() : null)).catch(() => null)])
+      .then(([me, cfg]) => {
+        if (alive) setAllowDns(dnsAllowed({ adminEnabled: !!cfg?.admin_enabled, role: me?.role }))
+      })
+    return () => { alive = false }
+  }, [])
+
+  const visibleScenarios = SCENARIOS.filter(s => s.id !== 'dns' || allowDns)
 
   function handleOpenCampaign(campaign) {
     if (campaign.key === 'ctf') {
@@ -135,13 +133,13 @@ export default function Scenarios() {
 
       {/* Section A — Quick Scenarios */}
       <section className="space-y-4">
-        <SectionDivider label="Quick Scenarios · single-technique attacks" />
+        <SectionDivider label="Single-technique Scenarios" />
         <p className="text-xs text-slate-500 -mt-1">
           Focused single-technique attacks with a live WebSocket terminal. Pick one, hit Run, watch the WAF respond.
         </p>
 
         <div className="grid grid-cols-1 sm:grid-cols-2 lg:grid-cols-3 gap-4">
-          {SCENARIOS.map(scenario => (
+          {visibleScenarios.map(scenario => (
             <ScenarioCard key={scenario.id} scenario={scenario} />
           ))}
         </div>
@@ -149,7 +147,7 @@ export default function Scenarios() {
 
       {/* Section B — Campaigns */}
       <section className="space-y-4">
-        <SectionDivider label="Campaigns · multi-phase adversary storylines" accent />
+        <SectionDivider label="Multi-phase Campaigns" accent />
         <p className="text-xs text-slate-500 -mt-1">
           Live drip pacing, phase timeline, and SOC talking points — opens the full ThreatOps console.
         </p>
@@ -167,7 +165,7 @@ export default function Scenarios() {
             </p>
           </div>
         ) : (
-          <div className="space-y-3">
+          <div className="grid grid-cols-1 sm:grid-cols-2 lg:grid-cols-3 gap-4">
             {campaigns.map(campaign => (
               <CampaignCard
                 key={campaign.key}

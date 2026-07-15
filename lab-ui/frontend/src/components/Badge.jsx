@@ -19,10 +19,13 @@ export default function Badge({ type, value, size = 'sm' }) {
 
   if (type === 'category') {
     const map = {
-      WAF:     'bg-orange-500/15 text-orange-400 border border-orange-500/30',
-      Access:  'bg-purple-500/15 text-purple-400 border border-purple-500/30',
-      Gateway: 'bg-blue-500/15 text-blue-400 border border-blue-500/30',
-      Workers: 'bg-red-400/15 text-red-300 border border-red-400/30',
+      WAF:              'bg-orange-500/15 text-orange-400 border border-orange-500/30',
+      Access:           'bg-purple-500/15 text-purple-400 border border-purple-500/30',
+      Gateway:          'bg-blue-500/15 text-blue-400 border border-blue-500/30',
+      Workers:          'bg-red-400/15 text-red-300 border border-red-400/30',
+      'Bot Management': 'bg-cyan-500/15 text-cyan-400 border border-cyan-500/30',
+      'AI Security':    'bg-pink-500/15 text-pink-400 border border-pink-500/30',
+      Campaign:         'bg-amber-500/15 text-amber-400 border border-amber-500/30',
     }
     return (
       <span className={`inline-flex items-center rounded-full font-semibold ${sizeClasses} ${map[value] || map.WAF}`}>

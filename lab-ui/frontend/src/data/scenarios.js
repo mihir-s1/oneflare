@@ -656,90 +656,85 @@ THRESHOLD: 10 matching events from same ClientIP
     id: "bot",
     number: "07",
     title: "Polymorphic AI Bot / Scraper",
-    shortDescription: "Rogue AI scraper rotates User-Agents every request while its TLS fingerprint (JA4) stays constant",
+    shortDescription: "Rogue AI scraper rotates User-Agents while Cloudflare's BotScore flags every request as automated",
     category: "Bot Management",
     categoryColor: "cyan",
     severity: "High",
     cfProduct: "Cloudflare Bot Management",
     target: "api.one-flare.com /api/v1/*",
-    detectionRule: "CF-BotMgmt-PolymorphicScraper",
+    detectionRule: "CF-BotMgmt-LowBotScoreScraper",
     tactic: "Reconnaissance / Automated Collection",
-    overview: "A rogue AI agent scrapes NovaMind and probes for training data and model weights, rotating its User-Agent every request to masquerade as many browsers, SDKs, and crawlers. But its TLS fingerprint (JA3/JA4) never changes — a Python client cannot disguise its TLS handshake. The tell is many User-Agents behind a single constant JA4 with a low Bot Management score.",
+    overview: "A rogue AI agent scrapes NovaMind and probes for training data and model weights, rotating its User-Agent every request to masquerade as many browsers, SDKs, and crawlers. The rotating UA doesn't fool Cloudflare's Bot Management ML model — it scores nearly every request from the client as automated (BotScore ≤ 29, on Cloudflare's 1–99 scale where lower = more bot-like). JA3/JA4 TLS fingerprinting would corroborate this, but JA4 fields are not emitted in this Cloudflare tenant, so detection here relies on BotScore volume clustering per source instead.",
     howItWorks: [
       "Script fires ~30 requests to sensitive API paths (/api/v1/models, /training-data, /users, /billing)",
       "User-Agent is randomized per request across 16 browser/SDK/agent-framework strings",
-      "The TLS fingerprint (JA4) is identical on every request — the underlying client is one Python process",
-      "Cloudflare Bot Management scores each request (low BotScore) and emits JA4 + BotTags",
-      "The many-UA / one-JA4 / low-score mismatch is the detection signal"
+      "Cloudflare Bot Management scores each request independently of the claimed User-Agent",
+      "Nearly every request from the source scores low (BotScore ≤ 29) despite the UA churn",
+      "A high volume of low-BotScore requests from one source against sensitive paths is the detection signal"
     ],
     cfLogs: `{
   "ClientIP": "1.2.3.4",
   "ClientRequestUserAgent": "LangChain/0.1.0",
-  "JA4": "t13d1812h1_85036bcba153_b26ce05bbdd6",
-  "BotScore": 12,
-  "BotTags": ["automated","ai-crawler"],
+  "BotScore": "12",
   "ClientRequestPath": "/api/v1/training-data"
 }`,
     siemLogic: `event.type = "CloudflareHTTPRequest"
-AND distinct(UserAgent) >= 5
-AND distinct(JA4) = 1
-AND BotScore <= 30
-THRESHOLD: >=10 requests from same JA4`,
+AND number(BotScore) <= 29
+THRESHOLD: >=20 requests from same ClientIP against api.* paths`,
     siemSeverity: "High",
     siemTactic: "Reconnaissance / Automated Collection",
     responseWorkflow: [
       { step: 1, action: "Get IP Overview", detail: "Enrich ClientIP and ASN — hosting/datacenter ranges corroborate automation" },
-      { step: 2, action: "Create WAF Rule", detail: "Challenge or block requests matching the constant JA4 fingerprint" },
+      { step: 2, action: "Create WAF Rule", detail: "Challenge or block requests from the source scoring BotScore ≤ 29" },
       { step: 3, action: "Enable Bot Fight Mode", detail: "Raise Bot Management enforcement on the api zone" },
-      { step: 4, action: "Notify SOC", detail: "Report the JA4, UA list, and probed endpoints" }
+      { step: 4, action: "Notify SOC", detail: "Report the source IP, UA list, min BotScore, and probed endpoints" }
     ],
     siem: {
-      ruleName: "CF-BotMgmt-PolymorphicScraper",
+      ruleName: "CF-BotMgmt-LowBotScoreScraper",
       ruleType: "Scheduled detection",
       queryLang: "PowerQuery 2.0 · SentinelOne SDL",
       dataSource: "Cloudflare zone HTTP Requests + Bot Management → OCSF HTTP Activity (class_uid 4002)",
       severity: "High",
       validated: false,
-      validationNote: "VALIDATION-PENDING — data not flowing. The HTTP Requests feed is live, but the Bot Management fields this rule depends on (unmapped.BotScore, unmapped.JA4, unmapped.BotTags, and the parser's ja4_fingerprint_list[0].value) are ALL null in the current data: the http_requests Logpush job is not yet emitting Bot Management fields (Bot Management may be provisioned but the fields are not on the log stream). The rule is written against the documented/parser-mapped field names and the exact JA4 the attack presents; it will validate once Bot Management fields appear. UI wiring for this scenario is also pending.",
-      importance: "Polymorphic bots defeat User-Agent-based blocking by rotating identities every request. TLS fingerprinting (JA3/JA4) is the durable identifier because the client's TLS stack can't be faked per-request. Detecting the many-UA / one-JA4 mismatch is how you catch a scraper, a credential-testing tool, or a rogue AI agent that a UA allow-list would miss.",
+      validationNote: "BotScore-based — JA4 not emitted in this Cloudflare tenant. Live-verified over a 14-day window: unmapped.JA4, unmapped.ClientRequestJA4, unmapped.JA4Signals, and unmapped.BotTags all returned 0 records (Bot Management's TLS-fingerprint fields are not on this account's log stream), but unmapped.BotScore DOES populate (19,581 of 573,594 Cloudflare HTTP Requests records). The rule below is rewritten against BotScore volume clustering per source and is pending a live-fire validation pass against this scenario's attack script.",
+      importance: "Polymorphic bots defeat User-Agent-based blocking by rotating identities every request. TLS fingerprinting (JA3/JA4) would be the durable identifier since a client's TLS stack can't be faked per-request — but JA4 isn't available in this tenant. Cloudflare's Bot Management ML score (BotScore) is the fallback signal: it scores the underlying client behavior, not the claimed UA, so a scraper rotating User-Agents still scores consistently low.",
       whyDetect: [
-        "JA4 is forgery-resistant: one Python/requests process presents one JA4 regardless of the User-Agent it claims.",
-        "Rotating UAs behind a single JA4 is a definitive automation tell no legitimate browser produces.",
-        "Low Bot Management score corroborates the mismatch with Cloudflare's own ML verdict.",
+        "BotScore is Cloudflare's own ML verdict on the request, independent of the User-Agent header the client claims.",
+        "A scraper rotating UAs still gets scored on its actual request behavior — the low score persists across every UA variant.",
+        "Clustering low-BotScore requests per source IP separates a sustained automated client from a one-off borderline score.",
         "Catches AI/agent-framework scrapers (LangChain/AutoGen/CrewAI UAs) hunting training data and model weights.",
       ],
-      query: `class_uid=4002 dataSource.cloudflare_dataset='HTTP Requests' unmapped.JA4=*
-| let ja4     = unmapped.JA4
+      query: `class_uid=4002 dataSource.cloudflare_dataset='HTTP Requests' unmapped.BotScore=*
 | let bot     = number(unmapped.BotScore)
 | let ua      = http_request.user_agent
 | let src_ip  = src_endpoint.ip
 | let host    = http_request.url.hostname
+| filter bot <= 29
 | group
-    requests     = count(),
+    hits         = count(),
+    min_score    = min(bot),
     distinct_ua  = estimate_distinct(ua),
-    distinct_ja4 = estimate_distinct(ja4),
-    min_bot      = min(bot),
     paths        = estimate_distinct(http_request.url.path),
-    ip_sample    = any(src_ip),
     ua_sample    = array_agg_distinct(ua),
     first_seen   = oldest(timestamp),
     last_seen    = newest(timestamp)
-  by ja4, host
-| filter distinct_ua >= 5 AND distinct_ja4 = 1 AND requests >= 10 AND min_bot <= 30
+  by src_ip, host
+| filter hits >= 20
 | let detection_time = simpledateformat(last_seen, 'yyyy-MM-dd HH:mm:ss z', 'America/Chicago')
-| sort -requests
-| columns detection_time, ja4, host, requests, distinct_ua, min_bot, paths, ip_sample, ua_sample, first_seen
+| sort -hits
+| columns detection_time, src_ip, host, hits, min_score, distinct_ua, paths, ua_sample, first_seen
 | limit 100`,
       queryExplained: [
-        { code: "unmapped.JA4=* (initial filter)", note: "Require a JA4 fingerprint present. The parser maps JA4 → ja4_fingerprint_list[0].value, but bracket-indexed fields can 500 in group/columns, so read the raw unmapped.JA4 scalar." },
-        { code: "group by ja4, host", note: "Aggregate all traffic sharing one TLS fingerprint — the durable client identity, immune to UA rotation." },
-        { code: "distinct_ua >= 5 AND distinct_ja4 = 1", note: "The core mismatch: many claimed identities, one real TLS client. This is the polymorphic-bot signature." },
-        { code: "min_bot <= 30", note: "Cloudflare Bot Management score (lower = more bot-like) corroborates. number()-cast; string-typed under unmapped.*." },
+        { code: "unmapped.BotScore=* (initial filter)", note: "Require a Bot Management score present. It lives under unmapped.* — the parser does not promote it to a top-level OCSF field in this tenant." },
+        { code: "number(unmapped.BotScore)", note: "BotScore is 1–99, STRING-typed in the SDL — cast with number() before comparison." },
+        { code: "filter bot <= 29", note: "Cloudflare's own threshold for 'likely automated' traffic; lower = more bot-like." },
+        { code: "group by src_ip, host", note: "Aggregate low-score traffic per source — a scraper making a sustained run, not a single borderline request." },
+        { code: "filter hits >= 20", note: "Require a cluster of low-score requests so one noisy-but-legitimate hit can't alert." },
       ],
       signals: [
-        { signal: "≥ 5 distinct User-Agents on one JA4", catches: "Polymorphic / UA-rotating bot", why: "A single TLS client claiming many browser identities is impossible for a real browser." },
-        { signal: "BotScore ≤ 30", catches: "Automated client", why: "Cloudflare's own ML flags the request as bot-like, corroborating the fingerprint mismatch." },
-        { signal: "≥ 10 requests / broad path set", catches: "Scraping / recon sweep", why: "Volume across many sensitive endpoints indicates collection, not casual browsing." },
+        { signal: "BotScore ≤ 29", catches: "Automated client", why: "Cloudflare's ML flags the request as bot-like regardless of the User-Agent it presents." },
+        { signal: "≥ 20 low-score requests from one source", catches: "Scraping / recon sweep", why: "Volume clustering separates a sustained automated client from an isolated borderline score." },
+        { signal: "Broad distinct path set against api.* sensitive endpoints", catches: "Training-data / model enumeration", why: "Spread across models/training-data/users/billing indicates collection, not a single legitimate integration call." },
       ],
       mitre: [
         { id: "T1595", tactic: "Reconnaissance", name: "Active Scanning", url: "https://attack.mitre.org/techniques/T1595/" },
@@ -747,12 +742,12 @@ THRESHOLD: >=10 requests from same JA4`,
         { id: "AML.T0002", tactic: "ATLAS Reconnaissance", name: "Acquire Public AI Artifacts / Model Recon", url: "https://atlas.mitre.org/techniques/AML.T0002" },
       ],
       falsePositive: {
-        finding: "Not yet observable (Bot Management fields null). Anticipated FP class: a legitimate SDK or mobile app that presents one JA4 but rotates UA strings across versions, or a shared corporate egress where many users share a TLS-terminating proxy JA4.",
-        rootCause: "Some shared proxies / SDKs legitimately map one JA4 to several UAs.",
-        fix: "Require min_bot ≤ 30 (already present) to demand Cloudflare's bot verdict, allow-list known SDK JA4s, and raise the distinct_ua threshold for known proxy fingerprints.",
+        finding: "Not yet re-validated against this scenario's attack script under the new query. Anticipated FP class: a legitimate high-volume integration or health-check client that Cloudflare's ML happens to score low, or a shared corporate egress IP with mixed legitimate automation (uptime monitors, RSS readers).",
+        rootCause: "BotScore is probabilistic ML, not a hard signature — some legitimate automated clients (monitoring, SDKs) score in the bot-like range.",
+        fix: "The hits ≥ 20 cluster gate absorbs isolated low scores; allow-list known monitoring/SDK source IPs and raise the threshold for hosts that legitimately serve API clients.",
       },
-      triage: "SUSPICIOUS — Pending Confirmation. Confirm the JA4 belongs to a scripting stack (not a shared browser fingerprint), review the probed paths for sensitive targets (models/training-data), and enrich the IP/ASN before enforcement.",
-      recommendedResponse: "Challenge or block the JA4 via a WAF rule, raise Bot Fight Mode on the api zone, and review what the scraper accessed. Full steps in the Response Playbook tab.",
+      triage: "SUSPICIOUS — Pending Confirmation. Review the probed paths for sensitive targets (models/training-data), check the UA list for AI-agent framework signatures, and enrich the source IP/ASN before enforcement.",
+      recommendedResponse: "Challenge or block the source IP via a WAF rule keyed on BotScore ≤ 29, raise Bot Fight Mode on the api zone, and review what the scraper accessed. Full steps in the Response Playbook tab.",
     }
   },
   {

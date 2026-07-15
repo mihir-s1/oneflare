@@ -11,7 +11,7 @@ import Badge from '../components/Badge.jsx'
 import Terminal from '../components/Terminal.jsx'
 import RunSummary from '../components/RunSummary.jsx'
 import TargetBar from '../components/TargetBar.jsx'
-import { getMe, getTenants, getRunTarget } from '../lib/session.js'
+import { getMe, getTenants, getRunTarget, dnsAllowed } from '../lib/session.js'
 
 const TABS = [
   { id: 'overview',  label: 'Overview',         icon: Info },
@@ -263,9 +263,10 @@ export default function ScenarioDetail() {
   // subdomain (non-admin, forced server-side) or an admin-selected target
   // (including the scenario-only "__all__" fan-out).
   const [session, setSession] = useState(null)
+  const [sessionLoaded, setSessionLoaded] = useState(false)
   useEffect(() => {
     let alive = true
-    getMe().then(me => { if (alive) setSession(me) })
+    getMe().then(me => { if (alive) { setSession(me); setSessionLoaded(true) } })
     return () => { alive = false }
   }, [])
 
@@ -273,14 +274,26 @@ export default function ScenarioDetail() {
   // fresh browser is pre-configured and anyone can run scenarios with zero setup.
   // A per-user localStorage value still overrides the server default.
   const [serverConfig, setServerConfig] = useState(null)
+  const [serverConfigLoaded, setServerConfigLoaded] = useState(false)
   useEffect(() => {
     let alive = true
     fetch('/api/config')
       .then(r => (r.ok ? r.json() : null))
-      .then(cfg => { if (alive) setServerConfig(cfg) })
-      .catch(() => {})
+      .then(cfg => { if (alive) { setServerConfig(cfg); setServerConfigLoaded(true) } })
+      .catch(() => { if (alive) setServerConfigLoaded(true) })
     return () => { alive = false }
   }, [])
+
+  // DNS uses account-level Gateway (shared, not per-tenant) — block direct
+  // URL access for anyone who isn't an admin on the default console, same
+  // gate applied to the scenario lists on Scenarios/Detections/Architecture.
+  useEffect(() => {
+    if (id !== 'dns') return
+    if (!sessionLoaded || !serverConfigLoaded) return
+    if (!dnsAllowed({ adminEnabled: !!serverConfig?.admin_enabled, role: session?.role })) {
+      navigate('/scenarios', { replace: true })
+    }
+  }, [id, session, sessionLoaded, serverConfig, serverConfigLoaded, navigate])
 
   useEffect(() => {
     return () => {

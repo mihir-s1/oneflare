@@ -7,6 +7,7 @@ import {
   Target,
   ShieldCheck,
 } from 'lucide-react'
+import AccountMenu from './AccountMenu'
 
 const NAV_ITEMS = [
   { to: '/',             label: 'Dashboard',    icon: LayoutDashboard },
@@ -127,6 +128,9 @@ export default function Navbar() {
             <span className="absolute bottom-0 left-2 right-2 h-px bg-gradient-to-r from-orange-500 to-purple-500 rounded-full" />
           )}
         </NavLink>
+
+        {/* Account — sign in, switch account (session replace), sign out */}
+        <AccountMenu />
 
         {/* Co-brand */}
         <div className="hidden xl:flex items-center gap-1.5 shrink-0 pl-2 border-l border-slate-700/40">

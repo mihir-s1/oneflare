@@ -1,7 +1,8 @@
-import { useState } from 'react'
+import { useState, useEffect } from 'react'
 import { Copy, Check, Shield, Info } from 'lucide-react'
 import { SCENARIOS } from '../data/scenarios.js'
 import Badge from '../components/Badge.jsx'
+import { getMe, dnsAllowed } from '../lib/session.js'
 
 function CopyButton({ text }) {
   const [copied, setCopied] = useState(false)
@@ -33,6 +34,17 @@ const CATEGORY_COLORS = {
 }
 
 export default function Detections() {
+  const [allowDns, setAllowDns] = useState(false)
+  useEffect(() => {
+    let alive = true
+    Promise.all([getMe(), fetch('/api/config').then(r => (r.ok ? r.json() : null)).catch(() => null)])
+      .then(([me, cfg]) => {
+        if (alive) setAllowDns(dnsAllowed({ adminEnabled: !!cfg?.admin_enabled, role: me?.role }))
+      })
+    return () => { alive = false }
+  }, [])
+  const visibleScenarios = SCENARIOS.filter(s => s.id !== 'dns' || allowDns)
+
   return (
     <div className="page-enter space-y-6">
       {/* Header */}
@@ -56,7 +68,7 @@ export default function Detections() {
 
       {/* Rules grid */}
       <div className="space-y-4">
-        {SCENARIOS.map(scenario => (
+        {visibleScenarios.map(scenario => (
           <div
             key={scenario.id}
             className={`rounded-xl border p-5 transition-all duration-200 hover:-translate-y-0.5 ${CATEGORY_COLORS[scenario.category] || 'border-[#2d1b4e] bg-[#1a0a2e]'}`}

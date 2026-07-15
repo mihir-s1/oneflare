@@ -68,3 +68,12 @@ export function effectiveRunTarget(scope = 'scenario') {
   if (scope === 'campaign' && v === '__all__') return ''
   return v
 }
+
+/**
+ * The DNS scenario uses account-level Gateway (shared across tenants, not
+ * per-subdomain) — it must only be visible to an admin on the default
+ * (one-flare) console, never to a non-admin or on a partner instance.
+ */
+export function dnsAllowed({ adminEnabled, role }) {
+  return !!adminEnabled && role === 'admin'
+}
