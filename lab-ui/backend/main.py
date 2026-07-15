@@ -1000,20 +1000,42 @@ def _deploy_ha(console: str, token: str, site: dict, obj: DeployObject) -> dict:
                           params={"siteIds": site_id}, json_body={"data": wf})
     if st not in (200, 201) or not isinstance(imp, dict):
         return {"key": obj.key, "type": "ha", "status": "error", "message": _s1_err(st, imp)}
-    wid = imp.get("id") or (imp.get("data") or {}).get("id")
+    # Import returns BOTH id and version_id at the top level (an imported workflow
+    # is a Private Draft owned by the token's user — INVISIBLE in the console until
+    # it is activated/published). Capture both so we can actually activate it.
+    idata = imp.get("data") if isinstance(imp.get("data"), dict) else imp
+    wid = imp.get("id") or (idata or {}).get("id")
+    vid = imp.get("version_id") or (idata or {}).get("version_id")
     if not wid:
         return {"key": obj.key, "type": "ha", "status": "error", "message": "import returned no workflow id"}
-    # Publish (scope with siteIds ONLY — adding accountIds breaks user-context
-    # resolution and 400s "User Context Service Error").
+
+    # ACTIVATE the imported version → state becomes Active (running) AND the draft
+    # leaves Private, so it's visible to the team in the console. This is the step
+    # that actually "uploads" a usable workflow. All HA ops scope with siteIds ONLY
+    # (accountIds 400s "User Context Service Error" for service-user tokens).
+    if vid:
+        ast, abody = _s1_request(console, token, "POST",
+                                 f"/web/api/v2.1/hyper-automate/api/public/workflows/{wid}/{vid}/activation",
+                                 params={"siteIds": site_id}, json_body={"data": {}})
+        if ast in (200, 204):
+            return {"key": obj.key, "type": "ha", "status": "deployed", "id": wid,
+                    "message": "imported + activated (Active in the console)"}
+        act_err = _s1_err(ast, abody)
+    else:
+        act_err = "import returned no version_id"
+
+    # Activation failed — at least publish so the workflow becomes a Shared Draft
+    # (visible in the console, not yet running) rather than an invisible private one.
     pst, pbody = _s1_request(console, token, "POST",
                              f"/web/api/v2.1/hyper-automate/api/v1/workflows/{wid}/publish",
                              params={"siteIds": site_id}, json_body={})
     if pst in (200, 204):
         return {"key": obj.key, "type": "ha", "status": "deployed", "id": wid,
-                "message": "imported + published (shared draft)"}
-    return {"key": obj.key, "type": "ha", "status": "deployed", "id": wid,
-            "message": f"imported (id={wid}); publish failed ({_s1_err(pst, pbody)}) — left a private draft. "
-                       "A personal Console User token is required to publish."}
+                "message": f"imported + published as a shared draft (visible but NOT running — "
+                           f"activation failed: {act_err}). Activate it in the console."}
+    return {"key": obj.key, "type": "ha", "status": "error", "id": wid,
+            "message": f"imported but could not activate or publish — it's an invisible private draft "
+                       f"(activation: {act_err}; publish: {_s1_err(pst, pbody)})."}
 
 
 def _deploy_dashboard(cfg: dict, obj: DeployObject) -> dict:
