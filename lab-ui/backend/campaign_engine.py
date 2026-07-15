@@ -78,6 +78,12 @@ _state = {
     "running":  False,
     "campaign": None,   # e.g. "ctf"
     "phase":    None,   # current phase number (int) or None
+    # Per-launch target base URL (e.g. https://alice.lab.soledrop.co). Set by
+    # launch() in the multi-user console so the campaign hits the caller's own
+    # subdomain WITHOUT relying on the process-global SHOP_URL_OVERRIDE (which is
+    # deliberately unset in multi-user mode — one shared process, many users).
+    # None in single-tenant mode → falls back to the env/role routing below.
+    "target":   None,
 }
 
 _task: Optional[asyncio.Task] = None
@@ -101,9 +107,10 @@ def _signal_shop_incident(active: bool) -> bool:
         key = getattr(_cfg, "INCIDENT_KEY", "") or ""
         if not key:
             return False
-        # Multi-tenant: the CTF (and its /status flip) follows this instance's
-        # registered lab subdomain when SHOP_URL_OVERRIDE is set.
-        target = (os.getenv("SHOP_URL_OVERRIDE")
+        # Multi-tenant: the CTF (and its /status flip) follows the launch target
+        # (multi-user console) or this instance's SHOP_URL_OVERRIDE (single-tenant).
+        target = (_state.get("target")
+                  or os.getenv("SHOP_URL_OVERRIDE")
                   or CAMPAIGNS.get("ctf", {}).get("target_url", "https://shop.soledrop.co")).rstrip("/")
         payload = {
             "key":      key,
@@ -130,6 +137,13 @@ def _resolve_target(campaign_key: str) -> str:
     """
     # A hardcoded target_url on the campaign entry overrides role-based routing.
     entry = CAMPAIGNS.get(campaign_key, {})
+    # Multi-user console: an explicit per-launch target (the caller's own lab
+    # subdomain) wins over everything — it collapses shop/portal/api onto the one
+    # subdomain, exactly like the subprocess scenario runner, so the campaign's
+    # traffic is isolated to that user's SentinelOne site.
+    launch_target = _state.get("target")
+    if launch_target:
+        return launch_target.rstrip("/")
     # Multi-tenant lab: when this instance has a registered lab identity, its
     # SHOP_URL_OVERRIDE (e.g. https://alice.lab.soledrop.co) redirects the CTF
     # and any shop-role campaign to this instance's own subdomain, so its traffic
@@ -314,6 +328,7 @@ async def _engine_task(campaign_key: str, mode: str, phase, volume: str):
         _state["running"]  = False
         _state["campaign"] = None
         _state["phase"]    = None
+        _state["target"]   = None
         _append_system_event("Campaign stopped", campaign_key, 0)
 
 
@@ -356,9 +371,14 @@ def launch(
     phase,
     volume: str,
     loop: asyncio.AbstractEventLoop,
+    target: Optional[str] = None,
 ) -> None:
     """
     Start the drip-flow engine.
+
+    `target` (optional): base URL to run against (e.g. https://alice.lab.soledrop.co).
+    In the multi-user console this is the caller's resolved lab subdomain; the
+    campaign hits it instead of the process-global default. None → env/role routing.
 
     Raises
     ------
@@ -383,6 +403,7 @@ def launch(
     _state["running"]  = True
     _state["campaign"] = campaign_key
     _state["phase"]    = 1
+    _state["target"]   = (target or None)
 
     _append_system_event(
         f"Campaign launched: {CAMPAIGNS[campaign_key]['name']} | mode={mode} | phase={phase} | volume={volume}",
@@ -405,6 +426,7 @@ def stop() -> None:
 
     if campaign_key == "ctf":
         _signal_shop_incident(False)
+    _state["target"]   = None
 
 
 def clear_incident() -> None:

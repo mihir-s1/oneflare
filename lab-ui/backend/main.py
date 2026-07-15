@@ -38,6 +38,10 @@ class LaunchRequest(BaseModel):
     mode: str = "live"                          # "live" | "preseed"
     phase: Union[int, str] = "all"              # int phase number or "all"
     volume: str = "medium"                      # "low" | "medium" | "high"
+    # Multi-user console: the subdomain to run against. Admins may pass any
+    # registered tenant host (validated server-side); ignored for non-admins
+    # (forced to their own). None = the admin's default (one-flare target).
+    target_subdomain: Optional[str] = None
 
 
 class LabRegisterRequest(BaseModel):
@@ -173,6 +177,53 @@ def _multi_user_mode() -> bool:
     return _li.admin_enabled()
 
 
+# ── Per-request identity resolution (multi-user console) ────────────────────
+# The backend never decodes the session itself — it asks the relay (which owns
+# sessions) via the cookie-forwarding proxy. Used to login-gate execution and to
+# resolve each run's AUTHORITATIVE target (so a user can't attack another's site).
+def _session_from_cookies(cookies: dict) -> Optional[dict]:
+    status, data, _ = _li.auth_request("GET", "/auth/me", cookies=cookies or {})
+    if status == 200 and isinstance(data, dict) and data.get("email"):
+        return {"email": data["email"], "role": data.get("role")}
+    return None
+
+
+def _own_subdomain(cookies: dict) -> Optional[str]:
+    status, data, _ = _li.auth_request("GET", "/auth/lab/identity", cookies=cookies or {})
+    if status == 200 and isinstance(data, dict):
+        ident = data.get("identity")
+        if isinstance(ident, dict):
+            return ident.get("subdomain")
+    return None
+
+
+def _resolve_run_target(cookies: dict, requested_subdomain: Optional[str]):
+    """Authoritative target for an execution request (multi-user mode only).
+
+    Returns (base_url_or_None, session). base_url None means "use the SERVER_CONFIG
+    default" — an admin who picked no subdomain runs against the original one-flare
+    targets (preserving prior behavior). Raises PermissionError when not logged in,
+    ValueError on a bad/unknown selection.
+      - admin: may target any REGISTERED subdomain (validated) or none (default).
+      - user/viewer: forced to their OWN subdomain (client selection ignored).
+    """
+    session = _session_from_cookies(cookies)
+    if not session:
+        raise PermissionError("login required")
+    role = session.get("role")
+    if role == "admin":
+        sub = (requested_subdomain or "").strip()
+        if sub and sub.lower() not in ("default", "one-flare", "oneflare"):
+            if _li.check_still_registered(sub) is not True:
+                raise ValueError(f"unknown target subdomain: {sub}")
+            return f"https://{sub}", session
+        return None, session
+    own = _own_subdomain(cookies)
+    if not own:
+        raise ValueError("Register your lab subdomain in Settings before running scenarios.")
+    return f"https://{own}", session
+
+
 # In single-tenant mode, re-pin this instance to its persisted subdomain at boot
 # (and reflect it into the subprocess scenario default). In multi-user (console)
 # mode we deliberately skip this — a global identity would clobber every user's
@@ -236,6 +287,28 @@ async def run_scenario(websocket: WebSocket, scenario_id: str):
     doh = config.get("gateway_doh_url") or SERVER_CONFIG["gateway_doh_url"]
     if doh:
         env["CF_GATEWAY_DOH_URL"] = doh
+
+    # Multi-user console: login-gate execution and resolve the target
+    # AUTHORITATIVELY from the session — the client-sent shop_url/portal_url/api_url
+    # are NOT trusted here (a user must never be able to attack another's site).
+    if _multi_user_mode():
+        try:
+            target, _session = _resolve_run_target(dict(websocket.cookies), config.get("target_subdomain"))
+        except PermissionError:
+            await websocket.send_text(json.dumps({"type": "error", "message": "Please log in to run scenarios."}))
+            await websocket.close()
+            return
+        except ValueError as exc:
+            await websocket.send_text(json.dumps({"type": "error", "message": str(exc)}))
+            await websocket.close()
+            return
+        if target:
+            env["SHOP_URL_OVERRIDE"] = env["PORTAL_URL_OVERRIDE"] = env["API_URL_OVERRIDE"] = target
+        else:
+            # Admin with no selection → the original one-flare targets.
+            env["SHOP_URL_OVERRIDE"]   = SERVER_CONFIG["shop_url"]
+            env["PORTAL_URL_OVERRIDE"] = SERVER_CONFIG["portal_url"]
+            env["API_URL_OVERRIDE"]    = SERVER_CONFIG["api_url"]
 
     if scenario_id == "all":
         cmd = [sys.executable, str(SCRIPTS_DIR / "demo.py")]
@@ -311,7 +384,7 @@ async def get_campaigns():
 
 
 @app.post("/api/campaign/launch")
-async def campaign_launch(body: LaunchRequest):
+async def campaign_launch(request: Request, body: LaunchRequest):
     """
     Start a drip-flow campaign.
 
@@ -321,9 +394,18 @@ async def campaign_launch(body: LaunchRequest):
                503 if campaign engine unavailable
     """
     _require_engine()
+    # Multi-user console: login-gate + resolve the authoritative target.
+    target = None
+    if _multi_user_mode():
+        try:
+            target, _session = _resolve_run_target(dict(request.cookies), body.target_subdomain)
+        except PermissionError:
+            raise HTTPException(status_code=401, detail="Please log in to run campaigns.")
+        except ValueError as exc:
+            raise HTTPException(status_code=400, detail=str(exc))
     try:
         loop = asyncio.get_event_loop()
-        _ce.launch(body.campaign, body.mode, body.phase, body.volume, loop)
+        _ce.launch(body.campaign, body.mode, body.phase, body.volume, loop, target=target)
     except ValueError as exc:
         raise HTTPException(status_code=400, detail=str(exc))
     return {
@@ -365,13 +447,15 @@ async def campaign_status():
 
 
 @app.post("/api/campaign/stop")
-async def campaign_stop():
+async def campaign_stop(request: Request):
     """
     Stop the running campaign.
     If the campaign is 'ctf', signal_incident(False) is called automatically.
     Response: {stopped:true}
     """
     _require_engine()
+    if _multi_user_mode() and _session_from_cookies(dict(request.cookies)) is None:
+        raise HTTPException(status_code=401, detail="Please log in.")
     _ce.stop()
     return {"stopped": True}
 
@@ -480,6 +564,22 @@ def lab_register(request: Request, body: LabRegisterRequest):
     if ident.get("shop_url"):
         _reflect_identity_urls(ident["shop_url"])
     return {"ok": True, "identity": ident}
+
+
+@app.get("/api/lab/tenants")
+def lab_tenants(request: Request):
+    """All registered subdomains, for the admin Scenarios-page target selector.
+
+    Proxies the relay's admin-gated /auth/tenants with the caller's cookie — a
+    non-admin (or logged-out) caller gets the relay's 401/403 passed through.
+    """
+    if not _multi_user_mode():
+        return {"tenants": []}
+    status, data, _ = _li.auth_request("GET", "/auth/tenants", cookies=dict(request.cookies))
+    if status != 200 or not isinstance(data, dict):
+        return JSONResponse(status_code=status or 502,
+                            content=data if isinstance(data, dict) else {"error": "relay error"})
+    return {"tenants": data.get("tenants", [])}
 
 
 # ---------------------------------------------------------------------------
