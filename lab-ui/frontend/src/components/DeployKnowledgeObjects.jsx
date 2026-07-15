@@ -490,7 +490,7 @@ function DeployStepView({ deploying, deployPhase, deployError, deployResults }) 
       </div>
       <p className="text-xs text-slate-500 leading-relaxed">
         Deployed detections are enabled (Active) immediately. Hyperautomation workflows are imported and
-        published under your account. Dashboards are written to your SDL config store.
+        activated (Active + visible in your console). Dashboards are written to your SDL config store.
       </p>
     </div>
   )
@@ -554,9 +554,25 @@ export default function DeployKnowledgeObjects() {
     setSelected(new Set())
     setDeployResults(null)
     setDeployError('')
-    fetchConfig()
+    initGate()
     // eslint-disable-next-line react-hooks/exhaustive-deps
   }, [open])
+
+  // Gate on the caller's ACTUAL role up front (not by inferring from a stray 403):
+  // logged-out → sign in; viewer → read-only; admin AND user → proceed. Deploy is
+  // NOT admin-only — any non-viewer can push to their own console.
+  async function initGate() {
+    setConfigLoading(true)
+    try {
+      const meRes = await fetch('/api/auth/me')
+      if (meRes.status === 401) { setGate('signin'); setConfigLoading(false); return }
+      const me = await meRes.json().catch(() => ({}))
+      if (me?.role === 'viewer') { setGate('readonly'); setConfigLoading(false); return }
+    } catch {
+      // fall through — fetchConfig will surface any reachability error
+    }
+    fetchConfig()
+  }
 
   async function fetchConfig() {
     setConfigLoading(true)
@@ -564,7 +580,7 @@ export default function DeployKnowledgeObjects() {
     try {
       const res = await fetch('/api/deploy/config')
       if (res.status === 401) { setGate('signin'); return }
-      if (res.status === 403) { setGate('readonly'); return }
+      if (res.status === 403) { setConfigError('Your role cannot configure deployment.'); return }
       const data = await res.json().catch(() => ({}))
       if (!res.ok) {
         setConfigError(data.error || data.detail || `Failed to load configuration (HTTP ${res.status})`)
@@ -603,7 +619,6 @@ export default function DeployKnowledgeObjects() {
         body: JSON.stringify(body),
       })
       if (res.status === 401) { setGate('signin'); return }
-      if (res.status === 403) { setGate('readonly'); return }
       const data = await res.json().catch(() => ({}))
       if (!res.ok) {
         setSaveError(data.error || data.detail || `Failed to save (HTTP ${res.status})`)
@@ -627,7 +642,6 @@ export default function DeployKnowledgeObjects() {
     try {
       const res = await fetch('/api/deploy/config', { method: 'DELETE' })
       if (res.status === 401) { setGate('signin'); return }
-      if (res.status === 403) { setGate('readonly'); return }
       setConfig({ configured: false })
       setConsoleUrlInput('')
       setValidateResult(null)
@@ -647,7 +661,6 @@ export default function DeployKnowledgeObjects() {
     try {
       const res = await fetch('/api/deploy/validate', { method: 'POST' })
       if (res.status === 401) { setGate('signin'); return }
-      if (res.status === 403) { setGate('readonly'); return }
       const data = await res.json().catch(() => ({}))
       if (!res.ok) {
         setValidateError(data.error || data.detail || `Validation failed (HTTP ${res.status})`)
@@ -731,7 +744,6 @@ export default function DeployKnowledgeObjects() {
         body: JSON.stringify({ objects }),
       })
       if (res.status === 401) { setGate('signin'); return }
-      if (res.status === 403) { setGate('readonly'); return }
       const data = await res.json().catch(() => ({}))
       if (!res.ok) {
         setDeployError(data.error || data.detail || `Deploy failed (HTTP ${res.status})`)
@@ -834,7 +846,7 @@ export default function DeployKnowledgeObjects() {
                     <Info className="w-3.5 h-3.5 text-orange-400 shrink-0 mt-0.5" />
                     <span>
                       Deployed detections are enabled (Active) immediately, and Hyperautomation workflows are
-                      published under your account.
+                      imported and activated (Active + visible in your console).
                     </span>
                   </div>
                   {KNOWLEDGE_OBJECT_GROUPS.map((group) => (
