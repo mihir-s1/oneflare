@@ -63,6 +63,14 @@ const ACCTREQ_PREFIX = "__acctreq__:";
 // point get (strongly read-after-write) rather than a list() scan (which lags a
 // fresh write by up to ~60s). Also __-prefixed → excluded from listRegistryRows.
 const OWNER_PREFIX = "__owner__:";
+// Per-user SentinelOne DEPLOY credentials (Phase 2 "Deploy Knowledge Objects").
+// One row per owner_email: the caller's OWN S1 console URL + API token (and
+// optional SDL config host + write key for dashboards). Secrets are stored
+// AES-GCM encrypted at rest (see s1cfg* helpers) — NEVER returned to a browser
+// session (only decrypted server-side via the ADMIN_TOKEN /auth/s1/config-raw
+// route so the backend can call S1 on the user's behalf). Also __-prefixed →
+// excluded from listRegistryRows so it never leaks into /admin/registry.
+const S1CFG_PREFIX = "__s1cfg__:";
 const PBKDF2_ITERATIONS = 100000;
 const INVITE_TTL_MS = 7 * 24 * 60 * 60 * 1000; // 7 days
 const SESSION_TTL_MS = 12 * 60 * 60 * 1000; // 12 hours
@@ -242,6 +250,74 @@ function redactToken(token) {
   if (!token) return null;
   const s = String(token);
   return s.length <= 4 ? "*".repeat(s.length) : "*".repeat(s.length - 4) + s.slice(-4);
+}
+
+// ── Per-user S1 deploy-credential encryption (AES-GCM at rest) ────────────────
+// Cloudflare KV is already encrypted at rest by the platform, but the S1 API
+// token is a high-value secret (full console access to the user's OWN tenant),
+// so we add an application layer of AES-GCM encryption. The key is derived via
+// PBKDF2-SHA256 from a relay secret (S1CFG_ENC_KEY if set, else the console
+// ADMIN_TOKEN — always present on the console deployment). A stored field is
+// either an {iv, ct} object (encrypted) or, if no key material is available, an
+// {enc:false, v} escape hatch; decryptField transparently handles both plus a
+// bare-string legacy form.
+async function s1cfgKey(env) {
+  const material = env.S1CFG_ENC_KEY || env.ADMIN_TOKEN || "";
+  if (!material) return null;
+  const enc = new TextEncoder();
+  const baseKey = await crypto.subtle.importKey(
+    "raw", enc.encode(material), "PBKDF2", false, ["deriveKey"]
+  );
+  return crypto.subtle.deriveKey(
+    { name: "PBKDF2", salt: enc.encode("oneflare-s1cfg-v1"), iterations: PBKDF2_ITERATIONS, hash: "SHA-256" },
+    baseKey,
+    { name: "AES-GCM", length: 256 },
+    false,
+    ["encrypt", "decrypt"]
+  );
+}
+
+async function encryptField(env, plaintext) {
+  if (plaintext == null || plaintext === "") return null;
+  const key = await s1cfgKey(env);
+  if (!key) return { enc: false, v: String(plaintext) }; // no key material — plaintext fallback
+  const iv = crypto.getRandomValues(new Uint8Array(12));
+  const ct = await crypto.subtle.encrypt(
+    { name: "AES-GCM", iv }, key, new TextEncoder().encode(String(plaintext))
+  );
+  return { iv: bytesToBase64(iv), ct: bytesToBase64(new Uint8Array(ct)) };
+}
+
+async function decryptField(env, field) {
+  if (field == null) return null;
+  if (typeof field === "string") return field;             // legacy bare string
+  if (field.enc === false) return field.v;                 // plaintext fallback form
+  if (!field.iv || !field.ct) return null;
+  const key = await s1cfgKey(env);
+  if (!key) return null;
+  try {
+    const pt = await crypto.subtle.decrypt(
+      { name: "AES-GCM", iv: base64ToBytes(field.iv) }, key, base64ToBytes(field.ct)
+    );
+    return new TextDecoder().decode(pt);
+  } catch {
+    return null;
+  }
+}
+
+// Redacted view of an S1 deploy-config row — safe to return to a browser session.
+// Never includes any token or key material.
+function s1cfgRedacted(row) {
+  if (!row) {
+    return { configured: false, console_url: null, has_token: false, has_sdl: false, updated_at: null };
+  }
+  return {
+    configured: true,
+    console_url: row.console_url || null,
+    has_token: !!row.api_token,
+    has_sdl: !!(row.sdl_xdr_url && row.sdl_write_key),
+    updated_at: row.updated_at || null,
+  };
 }
 
 // ── KV: audit/history log (rolling, capped) ───────────────────────────────────
@@ -1439,6 +1515,114 @@ async function handleAuthTenants(request, env) {
   return json({ ok: true, count: tenants.length, tenants });
 }
 
+// ── /auth/s1/* — per-user SentinelOne deploy credentials (Phase 2) ───────────
+//
+// Stores the caller's OWN S1 console URL + API token (+ optional SDL config host
+// + write key) so the backend can deploy STAR detections / HA workflows / SDL
+// dashboards to the user's own site. Session-gated for the browser-facing CRUD
+// (secrets never leave the relay redacted); the raw creds are readable ONLY via
+// the ADMIN_TOKEN break-glass route (/auth/s1/config-raw), which the backend
+// calls server-side so the browser never sees the token.
+
+// POST /auth/s1/config — upsert the caller's S1 deploy config (any non-viewer
+// session). Preserves an existing api_token / sdl_write_key when the field is
+// omitted (null) so a user can add SDL creds later without re-entering the token.
+async function handleS1ConfigPost(request, env) {
+  if (request.method !== "POST") return json({ error: "method not allowed" }, 405);
+  const session = await currentSession(request, env);
+  if (!session) return json({ error: "not authenticated" }, 401);
+  if (session.role === "viewer") return json({ error: "viewers cannot configure deployment" }, 403);
+
+  let body;
+  try {
+    body = await request.json();
+  } catch {
+    return json({ error: "invalid JSON body" }, 400);
+  }
+
+  const console_url = String((body && body.console_url) || "").trim();
+  if (!/^https:\/\/[^\s/]+/i.test(console_url)) {
+    return json({ error: "console_url must be an https:// URL" }, 400);
+  }
+
+  const key = S1CFG_PREFIX + normEmail(session.email);
+  const existingRaw = await env.REGISTRY.get(key);
+  const existing = existingRaw ? JSON.parse(existingRaw) : null;
+
+  // api_token: use the new value if a non-empty one is supplied; else keep the
+  // stored one. A config with no token at all is rejected.
+  const apiTokenIn = body && body.api_token != null ? String(body.api_token).trim() : "";
+  let apiTokenField = existing ? existing.api_token : null;
+  if (apiTokenIn) apiTokenField = await encryptField(env, apiTokenIn);
+  if (!apiTokenField) return json({ error: "api_token is required" }, 400);
+
+  // sdl_xdr_url (not secret): null in the body = leave unchanged; "" = clear.
+  let sdlXdrUrl = existing ? existing.sdl_xdr_url || null : null;
+  if (body && "sdl_xdr_url" in body && body.sdl_xdr_url != null) {
+    const v = String(body.sdl_xdr_url).trim();
+    sdlXdrUrl = v || null;
+  }
+  // sdl_write_key (secret): non-empty = set+encrypt; explicit "" = clear; null = keep.
+  let sdlWriteField = existing ? existing.sdl_write_key || null : null;
+  if (body && "sdl_write_key" in body && body.sdl_write_key != null) {
+    const v = String(body.sdl_write_key).trim();
+    sdlWriteField = v ? await encryptField(env, v) : null;
+  }
+
+  const row = {
+    owner_email: normEmail(session.email),
+    console_url,
+    api_token: apiTokenField,
+    sdl_xdr_url: sdlXdrUrl,
+    sdl_write_key: sdlWriteField,
+    updated_at: new Date().toISOString(),
+  };
+  await env.REGISTRY.put(key, JSON.stringify(row));
+  await appendHistory(env, { type: "s1cfg_saved", owner: session.email });
+  return json(s1cfgRedacted(row));
+}
+
+// GET /auth/s1/config — redacted status of the caller's own config.
+async function handleS1ConfigGet(request, env) {
+  const session = await currentSession(request, env);
+  if (!session) return json({ error: "not authenticated" }, 401);
+  const raw = await env.REGISTRY.get(S1CFG_PREFIX + normEmail(session.email));
+  return json(s1cfgRedacted(raw ? JSON.parse(raw) : null));
+}
+
+// DELETE /auth/s1/config — clear the caller's own config.
+async function handleS1ConfigDelete(request, env) {
+  const session = await currentSession(request, env);
+  if (!session) return json({ error: "not authenticated" }, 401);
+  if (session.role === "viewer") return json({ error: "viewers cannot configure deployment" }, 403);
+  await env.REGISTRY.delete(S1CFG_PREFIX + normEmail(session.email));
+  await appendHistory(env, { type: "s1cfg_deleted", owner: session.email });
+  return json({ ok: true, deleted: true });
+}
+
+// GET /auth/s1/config-raw?email=<e> — ADMIN_TOKEN break-glass ONLY. Returns the
+// DECRYPTED creds so the backend can call S1 on the user's behalf. This is the
+// ONLY route that emits the raw token, and it is gated purely on the console's
+// server-side ADMIN_TOKEN (no session path) — a browser can never reach it.
+async function handleS1ConfigRaw(request, env) {
+  if (!checkAdminToken(request, env)) return json({ error: "unauthorized" }, 401);
+  const url = new URL(request.url);
+  const email = normEmail(url.searchParams.get("email") || "");
+  if (!email) return json({ error: "email query param is required" }, 400);
+  const raw = await env.REGISTRY.get(S1CFG_PREFIX + email);
+  if (!raw) return json({ configured: false }, 404);
+  const row = JSON.parse(raw);
+  return json({
+    configured: true,
+    owner_email: row.owner_email || email,
+    console_url: row.console_url || null,
+    api_token: await decryptField(env, row.api_token),
+    sdl_xdr_url: row.sdl_xdr_url || null,
+    sdl_write_key: await decryptField(env, row.sdl_write_key),
+    updated_at: row.updated_at || null,
+  });
+}
+
 // ── Router ─────────────────────────────────────────────────────────────────
 
 export default {
@@ -1485,6 +1669,13 @@ export default {
     if (path === "/auth/lab/register" && request.method === "POST") return handleAuthLabRegister(request, env);
     if (path === "/auth/lab/identity" && request.method === "GET") return handleAuthLabIdentity(request, env);
     if (path === "/auth/tenants" && request.method === "GET") return handleAuthTenants(request, env);
+
+    // Per-user S1 deploy credentials (Phase 2). config-raw is ADMIN_TOKEN-only
+    // (raw secrets for the backend); the rest are session-gated + redacted.
+    if (path === "/auth/s1/config" && request.method === "POST") return handleS1ConfigPost(request, env);
+    if (path === "/auth/s1/config" && request.method === "GET") return handleS1ConfigGet(request, env);
+    if (path === "/auth/s1/config" && request.method === "DELETE") return handleS1ConfigDelete(request, env);
+    if (path === "/auth/s1/config-raw" && request.method === "GET") return handleS1ConfigRaw(request, env);
 
     const userRoleMatch = path.match(/^\/auth\/users\/([^/]+)\/role$/);
     if (userRoleMatch && request.method === "POST") return handleAuthUserRole(request, env, userRoleMatch[1]);

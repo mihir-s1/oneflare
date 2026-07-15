@@ -98,6 +98,27 @@ class AcceptRequestReq(BaseModel):
     token: str
     role: str = "user"
 
+
+# ── Phase 2 "Deploy Knowledge Objects" ──────────────────────────────────────
+class DeployConfigReq(BaseModel):
+    # The caller's OWN SentinelOne console. api_token/sdl_write_key are optional
+    # so a later save can update just the SDL fields without re-sending the token
+    # (the relay preserves an existing secret when the field is null).
+    console_url: str
+    api_token: Optional[str] = None
+    sdl_xdr_url: Optional[str] = None
+    sdl_write_key: Optional[str] = None
+
+
+class DeployObject(BaseModel):
+    type: str                          # 'detection' | 'ha' | 'dashboard'
+    key: str                           # stable id from the client manifest
+    payload: Union[dict, str] = {}     # the artifact JSON (dict); dashboards may be a JSON string
+
+
+class DeployRunReq(BaseModel):
+    objects: list[DeployObject] = []
+
 SCRIPTS_DIR = Path("/app/attack-scripts")
 
 SCENARIO_SCRIPTS = {
@@ -820,3 +841,277 @@ def auth_bootstrap(body: AuthBootstrapRequest):
     _require_admin()
     status, data = _li.admin_request("POST", "/auth/bootstrap", json_body=body.dict())
     return JSONResponse(status_code=status, content=data)
+
+
+# ---------------------------------------------------------------------------
+# Phase 2 — Deploy Knowledge Objects
+#
+# A logged-in user stores their OWN S1 console URL + API token (kept encrypted
+# at rest on the relay, never returned to the browser). The backend reads the
+# raw creds server-side (via lab_identity.s1_config_raw, ADMIN_TOKEN break-glass)
+# and deploys selected STAR detections / HA workflows / SDL dashboards to THEIR
+# own site, then activates them.
+#
+# Verified live contracts (reference console, site 2433185103040607397):
+#   detection: POST /web/api/v2.1/cloud-detection/rules  {data(no _-keys), filter:{siteIds:[site]}}
+#              → 200, id at data.id; enable via PUT .../rules/enable {filter:{ids:[id]}}
+#   ha:        POST .../hyper-automate/api/public/workflow-import-export/import?siteIds=<s> {data:wf}
+#              → 200, id+version_id top-level; publish via
+#              POST .../hyper-automate/api/v1/workflows/{id}/publish?siteIds=<s>  (siteIds ONLY —
+#              adding accountIds triggers "User Context Service Error" with a service token) → 204
+#   dashboard: SDL POST {sdl_xdr_url}/api/putFile {path:/dashboards/<key>, content} Bearer sdl_write_key
+# ---------------------------------------------------------------------------
+
+def _s1_request(base: str, token: str, method: str, path: str,
+                params: Optional[dict] = None, json_body=None, scheme: str = "ApiToken"):
+    """One S1/SDL HTTP call. Returns (status_code, parsed_json_or_raw_dict).
+    Never logs or returns the token. scheme is 'ApiToken' (mgmt/console) or
+    'Bearer' (SDL config API)."""
+    import httpx
+    url = base.rstrip("/") + path
+    headers = {"Authorization": f"{scheme} {token}", "Content-Type": "application/json"}
+    try:
+        with httpx.Client(timeout=45) as client:
+            r = client.request(method, url, params=params, json=json_body, headers=headers)
+    except httpx.HTTPError as exc:
+        return 502, {"error": f"unreachable: {exc}"}
+    try:
+        return r.status_code, r.json()
+    except ValueError:
+        return r.status_code, {"_raw": r.text[:300]}
+
+
+def _sdl_request(sdl_url: str, sdl_key: str, path: str, json_body: dict):
+    """SDL config API call (Bearer auth, POST)."""
+    return _s1_request(sdl_url, sdl_key, "POST", path, json_body=json_body, scheme="Bearer")
+
+
+def _s1_err(status, body) -> str:
+    """Compact human error string from an S1 response body."""
+    if isinstance(body, dict):
+        errs = body.get("errors")
+        if isinstance(errs, list) and errs:
+            e0 = errs[0] if isinstance(errs[0], dict) else {}
+            return f"HTTP {status}: {e0.get('detail') or e0.get('title') or errs[0]}"
+        detail = body.get("detail") or body.get("error") or body.get("message")
+        if detail:
+            return f"HTTP {status}: {detail}"
+    return f"HTTP {status}"
+
+
+def _deploy_load_creds(request: Request):
+    """Resolve the caller's session email, then pull their RAW S1 deploy creds
+    from the relay (ADMIN_TOKEN break-glass). Raises HTTPException on any gap.
+    Returns (email, cfg) where cfg has console_url/api_token/sdl_*."""
+    if not _multi_user_mode():
+        raise HTTPException(status_code=400, detail="Deploy is a multi-user console feature.")
+    session = _session_from_cookies(dict(request.cookies))
+    if not session:
+        raise HTTPException(status_code=401, detail="login required")
+    email = session["email"]
+    status, cfg = _li.s1_config_raw(email)
+    if status == 404:
+        raise HTTPException(status_code=400,
+                            detail="No SentinelOne console configured — save your console URL + API token first.")
+    if status != 200 or not isinstance(cfg, dict) or not cfg.get("console_url") or not cfg.get("api_token"):
+        msg = (cfg.get("error") if isinstance(cfg, dict) else None) or "could not read stored S1 config"
+        raise HTTPException(status_code=502, detail=msg)
+    return session, cfg
+
+
+def _deploy_pick_site(cookies: dict, console: str, token: str, messages: list):
+    """Pick the caller's target site: prefer the site whose name matches their
+    tenant site_label (from /auth/lab/identity), else the token's first site."""
+    st, data = _s1_request(console, token, "GET", "/web/api/v2.1/sites", params={"limit": 100})
+    if st != 200 or not isinstance(data, dict):
+        messages.append(f"could not list sites ({_s1_err(st, data)})")
+        return None
+    sites = (data.get("data") or {}).get("sites") or []
+    if not sites:
+        messages.append("this API token has access to no sites")
+        return None
+    label = None
+    lst, ldata, _ = _li.auth_request("GET", "/auth/lab/identity", cookies=cookies)
+    if lst == 200 and isinstance(ldata, dict):
+        ident = ldata.get("identity")
+        if isinstance(ident, dict):
+            label = (ident.get("site_label") or "").strip().lower()
+    chosen = None
+    if label:
+        for s in sites:
+            if (s.get("name") or "").strip().lower() == label:
+                chosen = s
+                break
+        if not chosen:
+            messages.append(f"tenant site '{label}' not found for this token — using the first available site")
+    if not chosen:
+        chosen = sites[0]
+    return {"id": chosen.get("id"), "name": chosen.get("name"), "accountId": chosen.get("accountId")}
+
+
+def _deploy_detection(console: str, token: str, site: dict, obj: DeployObject) -> dict:
+    payload = obj.payload if isinstance(obj.payload, dict) else {}
+    data = {k: v for k, v in (payload.get("data") or {}).items() if not str(k).startswith("_")}
+    name = data.get("name")
+    if not name:
+        return {"key": obj.key, "type": "detection", "status": "error", "message": "payload.data.name missing"}
+    data.setdefault("queryLang", "2.0")
+    site_id = site["id"]
+    # Dedup: an existing rule with the same name on this site → don't duplicate.
+    st, listing = _s1_request(console, token, "GET", "/web/api/v2.1/cloud-detection/rules",
+                              params={"isLegacy": "false", "limit": 200, "siteIds": site_id})
+    if st == 200 and isinstance(listing, dict):
+        for r in listing.get("data", []):
+            if (r.get("name") or "") == name:
+                rid = r.get("id")
+                _s1_request(console, token, "PUT", "/web/api/v2.1/cloud-detection/rules/enable",
+                            json_body={"filter": {"ids": [rid]}})
+                return {"key": obj.key, "type": "detection", "status": "skipped", "id": rid,
+                        "message": "a rule with this name already exists on the site (ensured enabled)"}
+    body = {"data": data, "filter": {"siteIds": [site_id]}}
+    st, created = _s1_request(console, token, "POST", "/web/api/v2.1/cloud-detection/rules", json_body=body)
+    if st != 200 or not isinstance(created, dict):
+        return {"key": obj.key, "type": "detection", "status": "error", "message": _s1_err(st, created)}
+    rid = (created.get("data") or {}).get("id")
+    if not rid:
+        return {"key": obj.key, "type": "detection", "status": "error", "message": "create returned no rule id"}
+    est, _en = _s1_request(console, token, "PUT", "/web/api/v2.1/cloud-detection/rules/enable",
+                           json_body={"filter": {"ids": [rid]}})
+    return {"key": obj.key, "type": "detection", "status": "deployed", "id": rid,
+            "message": "created + enabled" if est == 200 else f"created; enable returned HTTP {est}"}
+
+
+def _deploy_ha(console: str, token: str, site: dict, obj: DeployObject) -> dict:
+    wf = obj.payload if isinstance(obj.payload, dict) else {}
+    name = wf.get("name")
+    if not name:
+        return {"key": obj.key, "type": "ha", "status": "error", "message": "payload.name missing"}
+    site_id = site["id"]
+    # Dedup by exact name (server-side name__eq filter).
+    st, listing = _s1_request(console, token, "GET",
+                              "/web/api/v2.1/hyper-automate/api/public/workflows",
+                              params={"name__eq": name, "limit": 5, "siteIds": site_id})
+    if st == 200 and isinstance(listing, dict) and (listing.get("data") or []):
+        wid = (listing["data"][0] or {}).get("id")
+        return {"key": obj.key, "type": "ha", "status": "skipped", "id": wid,
+                "message": "a workflow with this name already exists on the site"}
+    st, imp = _s1_request(console, token, "POST",
+                          "/web/api/v2.1/hyper-automate/api/public/workflow-import-export/import",
+                          params={"siteIds": site_id}, json_body={"data": wf})
+    if st not in (200, 201) or not isinstance(imp, dict):
+        return {"key": obj.key, "type": "ha", "status": "error", "message": _s1_err(st, imp)}
+    wid = imp.get("id") or (imp.get("data") or {}).get("id")
+    if not wid:
+        return {"key": obj.key, "type": "ha", "status": "error", "message": "import returned no workflow id"}
+    # Publish (scope with siteIds ONLY — adding accountIds breaks user-context
+    # resolution and 400s "User Context Service Error").
+    pst, pbody = _s1_request(console, token, "POST",
+                             f"/web/api/v2.1/hyper-automate/api/v1/workflows/{wid}/publish",
+                             params={"siteIds": site_id}, json_body={})
+    if pst in (200, 204):
+        return {"key": obj.key, "type": "ha", "status": "deployed", "id": wid,
+                "message": "imported + published (shared draft)"}
+    return {"key": obj.key, "type": "ha", "status": "deployed", "id": wid,
+            "message": f"imported (id={wid}); publish failed ({_s1_err(pst, pbody)}) — left a private draft. "
+                       "A personal Console User token is required to publish."}
+
+
+def _deploy_dashboard(cfg: dict, obj: DeployObject) -> dict:
+    sdl_url = cfg.get("sdl_xdr_url")
+    sdl_key = cfg.get("sdl_write_key")
+    if not sdl_url or not sdl_key:
+        return {"key": obj.key, "type": "dashboard", "status": "skipped",
+                "message": "SDL config write key not provided"}
+    content = obj.payload if isinstance(obj.payload, str) else json.dumps(obj.payload)
+    st, body = _sdl_request(sdl_url.rstrip("/"), sdl_key, "/api/putFile",
+                            {"path": f"/dashboards/{obj.key}", "content": content})
+    ok = st == 200 and isinstance(body, dict) and str(body.get("status", "")).startswith("success")
+    if ok:
+        return {"key": obj.key, "type": "dashboard", "status": "deployed",
+                "message": f"putFile /dashboards/{obj.key}"}
+    return {"key": obj.key, "type": "dashboard", "status": "error", "message": _s1_err(st, body)}
+
+
+@app.get("/api/deploy/config")
+def deploy_config_get(request: Request):
+    """Redacted status of the caller's stored S1 deploy config (proxies the relay
+    with the session cookie). {configured, console_url, has_token, has_sdl, updated_at}."""
+    return _proxy_auth(request, "GET", "/auth/s1/config")
+
+
+@app.post("/api/deploy/config")
+def deploy_config_post(request: Request, body: DeployConfigReq):
+    """Upsert the caller's S1 deploy config. api_token / sdl_write_key are
+    write-only (null preserves the stored secret). Returns the redacted status."""
+    return _proxy_auth(request, "POST", "/auth/s1/config", body.dict())
+
+
+@app.delete("/api/deploy/config")
+def deploy_config_delete(request: Request):
+    """Clear the caller's stored S1 deploy config."""
+    return _proxy_auth(request, "DELETE", "/auth/s1/config")
+
+
+@app.post("/api/deploy/validate")
+def deploy_validate(request: Request):
+    """Validate the caller's stored S1 creds: resolve their site + probe which
+    object types can be deployed. Never echoes the token.
+    Response: {ok, console_url, site:{id,name,accountId}, capabilities:{detections,ha,dashboards}, messages:[]}."""
+    _session, cfg = _deploy_load_creds(request)
+    console = cfg["console_url"].rstrip("/")
+    token = cfg["api_token"]
+    messages: list = []
+    site = _deploy_pick_site(dict(request.cookies), console, token, messages)
+    if not site:
+        raise HTTPException(status_code=502, detail="; ".join(messages) or "no deployable site for this token")
+    caps = {"detections": False, "ha": False, "dashboards": False}
+    st, _ = _s1_request(console, token, "GET", "/web/api/v2.1/cloud-detection/rules",
+                        params={"isLegacy": "false", "limit": 1, "siteIds": site["id"]})
+    caps["detections"] = st == 200
+    if st != 200:
+        messages.append(f"detections probe returned HTTP {st}")
+    st, _ = _s1_request(console, token, "GET", "/web/api/v2.1/hyper-automate/api/v1/workflows",
+                        params={"limit": 1, "siteIds": site["id"]})
+    caps["ha"] = st == 200
+    if st != 200:
+        messages.append(f"hyperautomation probe returned HTTP {st}")
+    if cfg.get("sdl_xdr_url") and cfg.get("sdl_write_key"):
+        st, body = _sdl_request(cfg["sdl_xdr_url"].rstrip("/"), cfg["sdl_write_key"], "/api/listFiles", {})
+        caps["dashboards"] = st == 200 and isinstance(body, dict) and str(body.get("status", "")).startswith("success")
+        if not caps["dashboards"]:
+            messages.append(f"SDL listFiles probe returned HTTP {st}")
+    else:
+        messages.append("SDL config not provided — dashboard deploys will be skipped")
+    return {"ok": True, "console_url": console, "site": site, "capabilities": caps, "messages": messages}
+
+
+@app.post("/api/deploy/run")
+def deploy_run(request: Request, body: DeployRunReq):
+    """Deploy + activate the selected objects to the caller's own site. The
+    frontend sends each artifact JSON as `payload` (manifest is client-side truth;
+    the backend reads no repo files). Per-object result:
+    {key, type, status:'deployed'|'skipped'|'error', id?, message}."""
+    session, cfg = _deploy_load_creds(request)
+    if session.get("role") == "viewer":
+        raise HTTPException(status_code=403, detail="viewers cannot deploy")
+    console = cfg["console_url"].rstrip("/")
+    token = cfg["api_token"]
+    messages: list = []
+    site = _deploy_pick_site(dict(request.cookies), console, token, messages)
+    if not site:
+        raise HTTPException(status_code=502, detail="; ".join(messages) or "no deployable site for this token")
+    results = []
+    for obj in body.objects:
+        try:
+            if obj.type == "detection":
+                results.append(_deploy_detection(console, token, site, obj))
+            elif obj.type == "ha":
+                results.append(_deploy_ha(console, token, site, obj))
+            elif obj.type == "dashboard":
+                results.append(_deploy_dashboard(cfg, obj))
+            else:
+                results.append({"key": obj.key, "type": obj.type, "status": "error",
+                                "message": f"unknown object type '{obj.type}'"})
+        except Exception as exc:  # one bad object must not abort the batch
+            results.append({"key": obj.key, "type": obj.type, "status": "error", "message": str(exc)[:200]})
+    return {"ok": True, "site": site, "results": results}

@@ -250,6 +250,41 @@ def admin_request(method: str, path: str, json_body: Optional[dict] = None) -> t
     return resp.status_code, body
 
 
+def s1_config_raw(email: str) -> tuple[int, dict]:
+    """Fetch a user's RAW SentinelOne deploy creds from the relay (Phase 2).
+
+    Uses the console break-glass ADMIN_TOKEN to hit the relay's
+    /auth/s1/config-raw route — the only place the decrypted console API token /
+    SDL write key are ever emitted. The browser never sees these; the backend
+    reads them here to call S1 on the user's behalf, then discards them. Callers
+    must resolve+trust `email` from the caller's own SESSION first (never from a
+    client-supplied value). Returns (status_code, json) where json on success is
+    {configured, console_url, api_token, sdl_xdr_url, sdl_write_key, updated_at}.
+    """
+    base = _relay_base()
+    if not base:
+        return 503, {"error": "RELAY_URL not configured"}
+    token = os.getenv("ADMIN_TOKEN", "")
+    if not token:
+        return 403, {"error": "ADMIN_TOKEN not configured (console-only feature)"}
+    import httpx
+
+    try:
+        resp = httpx.get(
+            f"{base}/auth/s1/config-raw",
+            params={"email": email},
+            headers={"Authorization": f"Bearer {token}"},
+            timeout=15,
+        )
+    except httpx.HTTPError as exc:
+        return 502, {"error": f"relay unreachable: {exc}"}
+    try:
+        body = resp.json()
+    except ValueError:
+        body = {"error": resp.text[:300]}
+    return resp.status_code, body
+
+
 # ── RBAC auth proxy (cookie-forwarding, any deployment) ─────────────────────
 #
 # Unlike admin_request() (ADMIN_TOKEN, console-only break-glass), auth_request()
