@@ -59,7 +59,7 @@ function Section({ title, icon: Icon, children, defaultOpen = false }) {
   )
 }
 
-function Field({ label, fieldKey, value, onChange, type = 'text', placeholder = '', note, showToggle = false }) {
+function Field({ label, fieldKey, value, onChange, type = 'text', placeholder = '', note, showToggle = false, error = '' }) {
   const [show, setShow] = useState(false)
   const inputType = showToggle ? (show ? 'text' : 'password') : type
 
@@ -72,7 +72,8 @@ function Field({ label, fieldKey, value, onChange, type = 'text', placeholder = 
           value={value}
           onChange={(e) => onChange(fieldKey, e.target.value)}
           placeholder={placeholder}
-          className="lab-input pr-8"
+          className={`lab-input pr-8 ${error ? 'border-red-500/60 focus:border-red-500/60' : ''}`}
+          aria-invalid={!!error}
           spellCheck={false}
           autoComplete="off"
         />
@@ -86,9 +87,25 @@ function Field({ label, fieldKey, value, onChange, type = 'text', placeholder = 
           </button>
         )}
       </div>
-      {note && <p className="text-xs text-slate-500 leading-relaxed">{note}</p>}
+      {error
+        ? <p className="text-xs text-red-400 leading-relaxed">{error}</p>
+        : note && <p className="text-xs text-slate-500 leading-relaxed">{note}</p>}
     </div>
   )
+}
+
+// Validate the Lab Identity name → it becomes a DNS subdomain label
+// (<name>.lab.soledrop.co), so it must be a valid single label: letters, digits,
+// and internal hyphens only — no spaces, no dots/underscores/other symbols, and
+// no leading/trailing hyphen. Returns an error string, or '' when valid/empty.
+function validateLabName(raw) {
+  const v = (raw || '').trim()
+  if (!v) return ''
+  if (/\s/.test(v)) return 'No spaces allowed — use hyphens instead (e.g. "alice-lab").'
+  if (!/^[A-Za-z0-9-]+$/.test(v)) return 'Use only letters, numbers, and hyphens — no spaces or symbols.'
+  if (/^-|-$/.test(v)) return 'Cannot start or end with a hyphen.'
+  if (v.length > 63) return 'Too long — 63 characters max.'
+  return ''
 }
 
 // ── History helpers ────────────────────────────────────────────────────────
@@ -329,8 +346,11 @@ function LabIdentitySection({ serverConfig }) {
     return () => { alive = false }
   }, [])
 
+  const nameError = validateLabName(name)
+
   async function handleRegister(e) {
     e.preventDefault()
+    if (nameError) { setError(nameError); return }
     setRegistering(true)
     setError('')
     try {
@@ -338,7 +358,7 @@ function LabIdentitySection({ serverConfig }) {
         method: 'POST',
         headers: { 'Content-Type': 'application/json' },
         body: JSON.stringify({
-          name, s1_hec_url: buildHecUrl(s1Region), s1_hec_token: s1HecToken,
+          name: name.trim(), s1_hec_url: buildHecUrl(s1Region), s1_hec_token: s1HecToken,
           site_label: siteLabel, account_label: accountLabel,
           s1_console_url: s1ConsoleUrl || undefined,
         }),
@@ -399,7 +419,8 @@ function LabIdentitySection({ serverConfig }) {
             value={name}
             onChange={(_, v) => setName(v)}
             placeholder="e.g. alice"
-            note="Becomes your lab subdomain <name>.lab.soledrop.co."
+            note="Becomes your lab subdomain <name>.lab.soledrop.co. Letters, numbers, and hyphens only."
+            error={nameError}
           />
           <Field
             label="SentinelOne Region"
@@ -446,7 +467,7 @@ function LabIdentitySection({ serverConfig }) {
           <div className="flex items-center gap-3 pt-1">
             <button
               type="submit"
-              disabled={registering || !name || !s1Region || !s1HecToken || !siteLabel || !accountLabel}
+              disabled={registering || !name || !!nameError || !s1Region || !s1HecToken || !siteLabel || !accountLabel}
               className="btn-orange text-sm disabled:opacity-40"
             >
               {registering ? (
