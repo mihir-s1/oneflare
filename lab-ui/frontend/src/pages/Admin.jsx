@@ -340,21 +340,21 @@ function InviteUrlBanner({ invite, onDismiss }) {
     }
   }
   return (
-    <div className="rounded-xl border border-orange-500/30 bg-orange-500/5 p-4 flex flex-col gap-2">
-      <p className="text-sm text-slate-200">
+    <div className="rounded-xl border border-orange-500/30 bg-orange-500/5 p-5 flex flex-col gap-3">
+      <p className="text-sm text-slate-200 leading-relaxed">
         Invite created for <span className="font-mono text-orange-300">{invite.email}</span> ({invite.role}).
         {' '}Resend isn't configured on this deployment — share this link manually:
       </p>
       <div className="flex items-center gap-2">
-        <code className="flex-1 text-xs font-mono text-purple-300 bg-[#12081f] border border-[#2d1b4e] rounded-lg px-3 py-2 truncate">
+        <code className="flex-1 min-w-0 text-xs font-mono text-purple-300 bg-[#12081f] border border-[#2d1b4e] rounded-lg px-3 py-2 truncate">
           {invite.invite_url}
         </code>
-        <button onClick={copy} className="btn-ghost text-xs px-2 py-2 shrink-0">
+        <button onClick={copy} className="btn-ghost text-xs px-2.5 py-2 shrink-0">
           {copied ? <Check className="w-3.5 h-3.5 text-green-400" /> : <Copy className="w-3.5 h-3.5" />}
         </button>
-        <button onClick={onDismiss} className="btn-ghost text-xs px-2 py-2 shrink-0">Dismiss</button>
+        <button onClick={onDismiss} className="btn-ghost text-xs px-3 py-2 shrink-0">Dismiss</button>
       </div>
-      <p className="text-xs text-yellow-400/80">
+      <p className="text-xs text-yellow-400/80 leading-relaxed pt-1 border-t border-orange-500/10">
         Reminder: this deployment sits behind Cloudflare Access — the invitee's email must
         also be added to the Access allow-list, or the link/login page will be unreachable.
       </p>
@@ -377,8 +377,8 @@ function BulkResultRow({ result }) {
   }
 
   return (
-    <div className="flex items-center gap-2 px-3 py-2 border-b border-[#1e1235] last:border-0">
-      <span className="text-xs font-mono text-slate-300 truncate flex-1 min-w-0">{result.email}</span>
+    <div className="flex flex-wrap items-center gap-3 px-4 py-2.5 border-b border-[#1e1235] last:border-0">
+      <span className="text-xs font-mono text-slate-300 truncate flex-1 min-w-[140px]">{result.email}</span>
       <span className={`inline-flex items-center rounded-full font-semibold px-2 py-0.5 text-xs shrink-0 ${
         invited
           ? 'bg-green-500/15 text-green-400 border border-green-500/30'
@@ -387,14 +387,14 @@ function BulkResultRow({ result }) {
         {result.status}
       </span>
       {invited && result.invite_url && (
-        <>
-          <code className="text-xs font-mono text-purple-300 bg-[#12081f] border border-[#2d1b4e] rounded-lg px-2 py-1 truncate max-w-[260px]">
+        <div className="flex items-center gap-2 shrink-0">
+          <code className="text-xs font-mono text-purple-300 bg-[#12081f] border border-[#2d1b4e] rounded-lg px-2.5 py-1.5 truncate max-w-[220px] sm:max-w-[280px]">
             {result.invite_url}
           </code>
-          <button onClick={copy} className="btn-ghost text-xs px-2 py-1 shrink-0">
+          <button onClick={copy} className="btn-ghost text-xs px-2 py-1.5 shrink-0">
             {copied ? <Check className="w-3.5 h-3.5 text-green-400" /> : <Copy className="w-3.5 h-3.5" />}
           </button>
-        </>
+        </div>
       )}
     </div>
   )
@@ -524,7 +524,7 @@ function UsersTab({ role }) {
   }
 
   return (
-    <div className="space-y-4">
+    <div className="space-y-6">
       {error && (
         <div className="rounded-lg border border-red-500/20 bg-red-500/5 p-3 text-xs text-red-400">{error}</div>
       )}
@@ -534,59 +534,74 @@ function UsersTab({ role }) {
       )}
 
       {isAdmin && (
-        <div className="rounded-xl border border-[#2d1b4e] bg-[#1a0a2e]/50 p-4 space-y-3">
-          <div>
-            <p className="text-sm font-semibold text-slate-200 flex items-center gap-1.5">
-              <Users className="w-3.5 h-3.5" /> ThreatOps users — bulk invite
-            </p>
-            <p className="text-xs text-slate-500 mt-0.5">
-              Paste many emails (newline, comma, or space separated) to invite self-service tenants at once.
-            </p>
+        <div className="rounded-xl border border-[#2d1b4e] bg-[#1a0a2e]/50 p-5 space-y-4">
+          <div className="flex items-center gap-2">
+            <Users className="w-4 h-4 text-orange-400 shrink-0" />
+            <div>
+              <p className="text-sm font-semibold text-slate-200">ThreatOps users — bulk invite</p>
+              <p className="text-xs text-slate-500 mt-0.5">
+                Paste many emails (newline, comma, or space separated) to invite self-service tenants at once.
+              </p>
+            </div>
           </div>
-          <form onSubmit={handleBulkInvite} className="space-y-3">
-            <textarea
-              value={bulkEmails}
-              onChange={(e) => setBulkEmails(e.target.value)}
-              rows={4}
-              placeholder={'alice@example.com\nbob@example.com, carol@example.com'}
-              className="w-full rounded-lg bg-[#12081f] border border-[#2d1b4e] px-3 py-2 text-sm text-slate-200 font-mono focus:outline-none focus:border-orange-500/50"
-            />
+          <form onSubmit={handleBulkInvite} className="space-y-4">
+            <div>
+              <label className="block text-xs font-semibold text-slate-400 uppercase tracking-wider mb-1.5">
+                Emails
+              </label>
+              <textarea
+                value={bulkEmails}
+                onChange={(e) => setBulkEmails(e.target.value)}
+                rows={4}
+                placeholder={'alice@example.com\nbob@example.com, carol@example.com'}
+                className="w-full rounded-lg bg-[#12081f] border border-[#2d1b4e] px-3 py-2.5 text-sm text-slate-200 font-mono focus:outline-none focus:border-orange-500/50"
+              />
+            </div>
             <div className="flex flex-wrap items-end gap-3">
-              <div>
-                <label className="text-xs font-semibold text-slate-400 uppercase tracking-wider">Role</label>
+              <div className="w-full sm:w-40">
+                <label className="block text-xs font-semibold text-slate-400 uppercase tracking-wider mb-1.5">
+                  Role
+                </label>
                 <select
                   value={bulkRole}
                   onChange={(e) => setBulkRole(e.target.value)}
-                  className="mt-1 rounded-lg bg-[#12081f] border border-[#2d1b4e] px-3 py-2 text-sm text-slate-200 focus:outline-none focus:border-orange-500/50"
+                  className="w-full rounded-lg bg-[#12081f] border border-[#2d1b4e] px-3 py-2 text-sm text-slate-200 focus:outline-none focus:border-orange-500/50"
                 >
                   <option value="user">user</option>
                   <option value="viewer">viewer</option>
                   <option value="admin">admin</option>
                 </select>
               </div>
-              <button type="submit" disabled={bulkInviting || !bulkEmails.trim()} className="btn-primary text-sm disabled:opacity-40">
+              <button
+                type="submit"
+                disabled={bulkInviting || !bulkEmails.trim()}
+                className="btn-primary text-sm shrink-0 disabled:opacity-40"
+              >
                 <UserPlus className="w-3.5 h-3.5" />
                 {bulkInviting ? 'Inviting...' : 'Invite all'}
               </button>
             </div>
           </form>
-          <p className="text-xs text-yellow-400/80">
+          <p className="text-xs text-yellow-400/80 leading-relaxed pt-1 border-t border-[#2d1b4e]">
             Reminder: Resend isn't configured on this deployment — share links manually; invitees also need
             to be added to the Cloudflare Access allow-list.
           </p>
           {bulkError && <p className="text-xs text-red-400">{bulkError}</p>}
           {bulkResults.length > 0 && (
-            <div className="rounded-lg border border-[#2d1b4e] overflow-hidden">
-              {bulkResults.map((r) => <BulkResultRow key={r.email} result={r} />)}
+            <div className="space-y-2">
+              <p className="text-xs font-semibold text-slate-400 uppercase tracking-wider">Results</p>
+              <div className="rounded-lg border border-[#2d1b4e] overflow-hidden">
+                {bulkResults.map((r) => <BulkResultRow key={r.email} result={r} />)}
+              </div>
             </div>
           )}
         </div>
       )}
 
       {isAdmin && (
-        <form onSubmit={handleInvite} className="rounded-xl border border-[#2d1b4e] bg-[#1a0a2e]/50 p-4 flex flex-wrap items-end gap-3">
+        <form onSubmit={handleInvite} className="rounded-xl border border-[#2d1b4e] bg-[#1a0a2e]/50 p-5 flex flex-wrap items-end gap-4">
           <div className="flex-1 min-w-[220px]">
-            <label className="text-xs font-semibold text-slate-400 uppercase tracking-wider flex items-center gap-1">
+            <label className="text-xs font-semibold text-slate-400 uppercase tracking-wider flex items-center gap-1 mb-1.5">
               <Mail className="w-3 h-3" /> Invite admin by email
             </label>
             <input
@@ -594,23 +609,23 @@ function UsersTab({ role }) {
               required
               value={inviteEmail}
               onChange={(e) => setInviteEmail(e.target.value)}
-              className="mt-1 w-full rounded-lg bg-[#12081f] border border-[#2d1b4e] px-3 py-2 text-sm text-slate-200 focus:outline-none focus:border-orange-500/50"
+              className="w-full rounded-lg bg-[#12081f] border border-[#2d1b4e] px-3 py-2 text-sm text-slate-200 focus:outline-none focus:border-orange-500/50"
               placeholder="name@sentinelone.com"
             />
           </div>
-          <div>
-            <label className="text-xs font-semibold text-slate-400 uppercase tracking-wider">Role</label>
+          <div className="w-full sm:w-40">
+            <label className="block text-xs font-semibold text-slate-400 uppercase tracking-wider mb-1.5">Role</label>
             <select
               value={inviteRole}
               onChange={(e) => setInviteRole(e.target.value)}
-              className="mt-1 rounded-lg bg-[#12081f] border border-[#2d1b4e] px-3 py-2 text-sm text-slate-200 focus:outline-none focus:border-orange-500/50"
+              className="w-full rounded-lg bg-[#12081f] border border-[#2d1b4e] px-3 py-2 text-sm text-slate-200 focus:outline-none focus:border-orange-500/50"
             >
               <option value="user">user</option>
               <option value="viewer">viewer</option>
               <option value="admin">admin</option>
             </select>
           </div>
-          <button type="submit" disabled={inviting} className="btn-primary text-sm disabled:opacity-40">
+          <button type="submit" disabled={inviting} className="btn-primary text-sm shrink-0 disabled:opacity-40">
             <UserPlus className="w-3.5 h-3.5" />
             {inviting ? 'Inviting...' : 'Invite'}
           </button>
@@ -618,67 +633,75 @@ function UsersTab({ role }) {
       )}
 
       <div className="rounded-xl border border-[#2d1b4e] overflow-hidden">
-        <div className="grid grid-cols-[1fr_auto_auto_auto_auto] gap-4 px-5 py-3 bg-[#1a0a2e] border-b border-[#2d1b4e] text-xs font-semibold text-slate-500 uppercase tracking-wider items-center">
-          <span>Email</span>
-          <span>Role</span>
-          <span>Created</span>
-          <span>Last Login</span>
-          <span>Actions</span>
-        </div>
-        {users.length === 0 && (
-          <div className="px-5 py-6 text-sm text-slate-500">No admin users yet.</div>
-        )}
-        {users.map((u) => (
-          <div key={u.email} className="grid grid-cols-[1fr_auto_auto_auto_auto] gap-4 px-5 py-3 border-b border-[#1e1235] last:border-0 items-center">
-            <span className="text-sm font-mono text-slate-200 truncate">{u.email}</span>
-            <RoleBadge role={u.role} />
-            <span className="text-xs font-mono text-slate-500 whitespace-nowrap">{formatTime(u.created_at)}</span>
-            <span className="text-xs font-mono text-slate-500 whitespace-nowrap">{formatTime(u.last_login)}</span>
-            <div className="flex items-center gap-2 justify-end">
-              {isAdmin ? (
-                <>
-                  <select
-                    value={u.role}
-                    disabled={busyEmail === u.email}
-                    onChange={(e) => handleRoleChange(u.email, e.target.value)}
-                    className="text-xs rounded-lg bg-[#12081f] border border-[#2d1b4e] px-2 py-1 text-slate-300 disabled:opacity-40"
-                  >
-                    <option value="user">user</option>
-                    <option value="viewer">viewer</option>
-                    <option value="admin">admin</option>
-                  </select>
-                  <button
-                    onClick={() => handleRemove(u.email)}
-                    disabled={busyEmail === u.email}
-                    className="btn-ghost text-xs px-2 py-1 text-red-400 hover:text-red-300 hover:border-red-500/30 disabled:opacity-40"
-                  >
-                    <Trash2 className="w-3.5 h-3.5" />
-                  </button>
-                </>
-              ) : (
-                <span className="text-xs text-slate-600 italic">view only</span>
-              )}
+        <div className="overflow-x-auto">
+          <div className="min-w-[640px]">
+            <div className="grid grid-cols-[1fr_auto_auto_auto_auto] gap-4 px-5 py-3 bg-[#1a0a2e] border-b border-[#2d1b4e] text-xs font-semibold text-slate-500 uppercase tracking-wider items-center">
+              <span>Email</span>
+              <span>Role</span>
+              <span>Created</span>
+              <span>Last Login</span>
+              <span>Actions</span>
             </div>
+            {users.length === 0 && (
+              <div className="px-5 py-6 text-sm text-slate-500">No admin users yet.</div>
+            )}
+            {users.map((u) => (
+              <div key={u.email} className="grid grid-cols-[1fr_auto_auto_auto_auto] gap-4 px-5 py-3.5 border-b border-[#1e1235] last:border-0 items-center">
+                <span className="text-sm font-mono text-slate-200 truncate">{u.email}</span>
+                <RoleBadge role={u.role} />
+                <span className="text-xs font-mono text-slate-500 whitespace-nowrap">{formatTime(u.created_at)}</span>
+                <span className="text-xs font-mono text-slate-500 whitespace-nowrap">{formatTime(u.last_login)}</span>
+                <div className="flex items-center gap-2 justify-end">
+                  {isAdmin ? (
+                    <>
+                      <select
+                        value={u.role}
+                        disabled={busyEmail === u.email}
+                        onChange={(e) => handleRoleChange(u.email, e.target.value)}
+                        className="text-xs rounded-lg bg-[#12081f] border border-[#2d1b4e] px-2 py-1.5 text-slate-300 disabled:opacity-40"
+                      >
+                        <option value="user">user</option>
+                        <option value="viewer">viewer</option>
+                        <option value="admin">admin</option>
+                      </select>
+                      <button
+                        onClick={() => handleRemove(u.email)}
+                        disabled={busyEmail === u.email}
+                        className="btn-ghost text-xs px-2 py-1.5 text-red-400 hover:text-red-300 hover:border-red-500/30 disabled:opacity-40"
+                      >
+                        <Trash2 className="w-3.5 h-3.5" />
+                      </button>
+                    </>
+                  ) : (
+                    <span className="text-xs text-slate-600 italic">view only</span>
+                  )}
+                </div>
+              </div>
+            ))}
           </div>
-        ))}
+        </div>
       </div>
 
       <div className="rounded-xl border border-[#2d1b4e] overflow-hidden">
-        <div className="grid grid-cols-[1fr_auto_auto] gap-4 px-5 py-3 bg-[#1a0a2e] border-b border-[#2d1b4e] text-xs font-semibold text-slate-500 uppercase tracking-wider items-center">
-          <span>Pending invite</span>
-          <span>Role</span>
-          <span>Expires</span>
-        </div>
-        {invites.length === 0 && (
-          <div className="px-5 py-6 text-sm text-slate-500">No pending invites.</div>
-        )}
-        {invites.map((i) => (
-          <div key={i.email} className="grid grid-cols-[1fr_auto_auto] gap-4 px-5 py-3 border-b border-[#1e1235] last:border-0 items-center">
-            <span className="text-sm font-mono text-slate-300 truncate">{i.email}</span>
-            <RoleBadge role={i.role} />
-            <span className="text-xs font-mono text-slate-500 whitespace-nowrap">{formatTime(i.expires_at)}</span>
+        <div className="overflow-x-auto">
+          <div className="min-w-[480px]">
+            <div className="grid grid-cols-[1fr_auto_auto] gap-4 px-5 py-3 bg-[#1a0a2e] border-b border-[#2d1b4e] text-xs font-semibold text-slate-500 uppercase tracking-wider items-center">
+              <span>Pending invite</span>
+              <span>Role</span>
+              <span>Expires</span>
+            </div>
+            {invites.length === 0 && (
+              <div className="px-5 py-6 text-sm text-slate-500">No pending invites.</div>
+            )}
+            {invites.map((i) => (
+              <div key={i.email} className="grid grid-cols-[1fr_auto_auto] gap-4 px-5 py-3.5 border-b border-[#1e1235] last:border-0 items-center">
+                <span className="text-sm font-mono text-slate-300 truncate">{i.email}</span>
+                <RoleBadge role={i.role} />
+                <span className="text-xs font-mono text-slate-500 whitespace-nowrap">{formatTime(i.expires_at)}</span>
+              </div>
+            ))}
           </div>
-        ))}
+        </div>
       </div>
     </div>
   )
@@ -987,7 +1010,7 @@ export default function Admin() {
             </button>
           </div>
 
-          <div className="pt-2 space-y-3">
+          <div className="pt-4 space-y-4">
             {activeTab === 'tenants' && !isViewer && (
               <div className="flex items-center justify-end">
                 <button

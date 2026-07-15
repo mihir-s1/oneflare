@@ -263,7 +263,10 @@ body {
 }
 
 /* Button base */
-.btn-orange {
+/* .btn-primary is an alias for the app's one primary (orange) button style —
+   several pages reference it as the semantic "primary action" class. */
+.btn-orange,
+.btn-primary {
   background: linear-gradient(135deg, #f38020 0%, #e07318 100%);
   color: white;
   border: none;
@@ -277,15 +280,18 @@ body {
   align-items: center;
   gap: 0.5rem;
 }
-.btn-orange:hover {
+.btn-orange:hover,
+.btn-primary:hover {
   background: linear-gradient(135deg, #e07318 0%, #c4641a 100%);
   box-shadow: 0 4px 16px rgba(243, 128, 32, 0.35);
   transform: translateY(-1px);
 }
-.btn-orange:active {
+.btn-orange:active,
+.btn-primary:active {
   transform: translateY(0);
 }
-.btn-orange:disabled {
+.btn-orange:disabled,
+.btn-primary:disabled {
   opacity: 0.5;
   cursor: not-allowed;
   transform: none;
