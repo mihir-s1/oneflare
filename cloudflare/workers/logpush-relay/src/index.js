@@ -1025,10 +1025,10 @@ async function handleAuthInviteBulk(request, env) {
     });
   }
 
-  // Onboard all newly-invited emails in one shot (batched allowlist PUT + emails
-  // sent concurrently). Best-effort; never fails the invite response.
-  const fresh = results.filter((r) => r.status === "invited");
-  const emailed = await onboardInvites(env, fresh);
+  // Onboard everyone we have a link for — freshly invited AND already-pending
+  // (re-running bulk should re-email + ensure allowlisting for pending invitees).
+  const toOnboard = results.filter((r) => r.invite_url);
+  const emailed = await onboardInvites(env, toOnboard);
 
   return json({ ok: true, count: results.length, emailed, results });
 }
