@@ -622,9 +622,18 @@ async function handleRegister(request, env) {
     return json({ error: "invalid or missing enroll code" }, 403);
   }
 
-  const { name, s1_hec_url, s1_hec_token, site_label } = body || {};
-  if (!name || !s1_hec_url || !s1_hec_token) {
-    return json({ error: "name, s1_hec_url, and s1_hec_token are all required" }, 400);
+  const { name, s1_hec_url, s1_hec_token, site_label, account_label, s1_console_url } = body || {};
+  // site_label (the S1 site) and account_label (the S1 account) are REQUIRED so
+  // the admin console can always name the real destination behind the opaque HEC
+  // token — the token itself carries no account/site identity. s1_console_url
+  // (the console/"purple" domain) is optional display metadata.
+  const label = String(site_label || "").trim().slice(0, 200);
+  const account = String(account_label || "").trim().slice(0, 200);
+  const consoleUrl = String(s1_console_url || "").trim().slice(0, 300) || null;
+  if (!name || !s1_hec_url || !s1_hec_token || !label || !account) {
+    return json({
+      error: "name, s1_hec_url, s1_hec_token, site_label, and account_label are all required",
+    }, 400);
   }
 
   const slug = slugify(name);
@@ -634,20 +643,19 @@ async function handleRegister(request, env) {
 
   const host = `${slug}.${LAB_DOMAIN}`;
   const now = new Date().toISOString();
-  const label = site_label != null ? String(site_label).trim().slice(0, 200) || null : null;
 
   const existingRaw = await env.REGISTRY.get(host);
   let row;
   if (existingRaw) {
-    // Idempotent re-register: update the S1 destination, preserve counters
-    // and history rather than erroring.
+    // Idempotent re-register: update the S1 destination + labels, preserve
+    // counters and history rather than erroring.
     row = JSON.parse(existingRaw);
     row.name = name;
     row.s1_hec_url = s1_hec_url;
     row.s1_hec_token = s1_hec_token;
-    // Only overwrite site_label when the caller actually supplied one — an
-    // idempotent re-register without a label shouldn't wipe an existing one.
-    if (label) row.site_label = label;
+    row.site_label = label;
+    row.account_label = account;
+    row.s1_console_url = consoleUrl;
   } else {
     row = {
       name,
@@ -655,6 +663,8 @@ async function handleRegister(request, env) {
       s1_hec_url,
       s1_hec_token,
       site_label: label,
+      account_label: account,
+      s1_console_url: consoleUrl,
       status: "active",
       created_at: now,
       forwarded: 0,

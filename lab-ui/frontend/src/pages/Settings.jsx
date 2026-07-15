@@ -278,6 +278,8 @@ function LabIdentitySection({ serverConfig }) {
   const [s1HecUrl, setS1HecUrl] = useState('')
   const [s1HecToken, setS1HecToken] = useState('')
   const [siteLabel, setSiteLabel] = useState('')
+  const [accountLabel, setAccountLabel] = useState('')
+  const [s1ConsoleUrl, setS1ConsoleUrl] = useState('')
   const [identity, setIdentity] = useState(null)
   const [loading, setLoading] = useState(true)
   const [registering, setRegistering] = useState(false)
@@ -305,6 +307,8 @@ function LabIdentitySection({ serverConfig }) {
           setName(data.identity.name || '')
           setS1HecUrl(data.identity.s1_hec_url || '')
           setSiteLabel(data.identity.site_label || '')
+          setAccountLabel(data.identity.account_label || '')
+          setS1ConsoleUrl(data.identity.s1_console_url || '')
           localStorage.setItem(LAB_NAME_KEY, data.identity.name || '')
           if (data.identity.subdomain) localStorage.setItem(LAB_SUBDOMAIN_KEY, data.identity.subdomain)
         }
@@ -324,7 +328,8 @@ function LabIdentitySection({ serverConfig }) {
         headers: { 'Content-Type': 'application/json' },
         body: JSON.stringify({
           name, s1_hec_url: s1HecUrl, s1_hec_token: s1HecToken,
-          site_label: siteLabel || undefined,
+          site_label: siteLabel, account_label: accountLabel,
+          s1_console_url: s1ConsoleUrl || undefined,
         }),
       })
       const data = await res.json().catch(() => ({}))
@@ -402,18 +407,34 @@ function LabIdentitySection({ serverConfig }) {
             note="Sent only to this backend on submit — never stored in your browser."
           />
           <Field
-            label="Site Label (optional)"
+            label="S1 Site"
             fieldKey="lab_site_label"
             value={siteLabel}
             onChange={(_, v) => setSiteLabel(v)}
-            placeholder="e.g. Alice's laptop — SOC demo"
-            note="Shown to the admin in the relay's tenant list for visibility only — not used for routing."
+            placeholder="e.g. ahamidi"
+            note="Required. The SentinelOne site this instance's logs land in — named in the admin tenant list (display only, not used for routing)."
+          />
+          <Field
+            label="S1 Account"
+            fieldKey="lab_account_label"
+            value={accountLabel}
+            onChange={(_, v) => setAccountLabel(v)}
+            placeholder="e.g. SentinelOne"
+            note="Required. The SentinelOne account that owns the site."
+          />
+          <Field
+            label="S1 Console URL (optional)"
+            fieldKey="lab_s1_console_url"
+            value={s1ConsoleUrl}
+            onChange={(_, v) => setS1ConsoleUrl(v)}
+            placeholder="e.g. https://usea1-purple.sentinelone.net"
+            note="Optional. Your console/'purple' domain — shown as the destination host in the admin list. Falls back to the ingest host if blank."
           />
 
           <div className="flex items-center gap-3 pt-1">
             <button
               type="submit"
-              disabled={registering || !name || !s1HecUrl || !s1HecToken}
+              disabled={registering || !name || !s1HecUrl || !s1HecToken || !siteLabel || !accountLabel}
               className="btn-orange text-sm disabled:opacity-40"
             >
               {registering ? (

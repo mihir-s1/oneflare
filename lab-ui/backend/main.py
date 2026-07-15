@@ -44,7 +44,12 @@ class LabRegisterRequest(BaseModel):
     name: str
     s1_hec_url: str
     s1_hec_token: str
+    # site_label (S1 site) + account_label (S1 account) are required by the relay
+    # and validated in lab_identity.register() (400 on missing). Optional here so
+    # the failure surfaces as a friendly 400, not a pydantic 422.
     site_label: Optional[str] = None
+    account_label: Optional[str] = None
+    s1_console_url: Optional[str] = None
 
 
 class AdminBatchDeleteRequest(BaseModel):
@@ -402,7 +407,10 @@ def lab_register(body: LabRegisterRequest):
     a threadpool. 400 = bad input, 502 = relay unreachable/rejected.
     """
     try:
-        ident = _li.register(body.name, body.s1_hec_url, body.s1_hec_token, body.site_label)
+        ident = _li.register(
+            body.name, body.s1_hec_url, body.s1_hec_token,
+            body.site_label, body.account_label, body.s1_console_url,
+        )
     except ValueError as exc:
         raise HTTPException(status_code=400, detail=str(exc))
     except RuntimeError as exc:

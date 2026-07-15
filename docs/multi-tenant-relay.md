@@ -117,7 +117,7 @@ no per-record work.
 | Relay endpoints | `POST /ingest`, `POST /register`, `GET /admin/registry`, `GET /admin/history`, `POST /admin/user/:subdomain/{enable,disable}`, `DELETE /admin/user/:subdomain`, `GET /health` | `:subdomain` accepts bare slug or full host |
 | KV registry | Binding `REGISTRY` | Tenant rows keyed by full host; reserved keys `__history__` (rolling audit log, capped at 200) and `__unknown__:<host>` (drop counters for unmatched hosts) |
 | Logpush jobs | 2 shared jobs on `soledrop.co`: `http_requests` + `firewall_events` | Both filtered to `ClientRequestHost contains ".lab.soledrop.co"`, both pointed at the relay's `/ingest` |
-| lab-ui Settings → Lab Identity | `lab-ui/frontend/src/pages/Settings.jsx` | Where a partner registers: name + their S1 HEC URL/token. Calls backend `POST /api/lab/register` |
+| lab-ui Settings → Lab Identity | `lab-ui/frontend/src/pages/Settings.jsx` | Where a partner registers: name + S1 HEC URL/token + **required** `site_label` (S1 site) and `account_label` (S1 account) + optional `s1_console_url`. Calls backend `POST /api/lab/register` |
 | lab-ui Admin page | `lab-ui/frontend/src/pages/Admin.jsx` | Tenant table (enable/disable/delete) + history log. Only renders admin data when the backend has `ADMIN_TOKEN` configured (console deployment only) |
 | Backend relay client | `lab-ui/backend/lab_identity.py` | Persists this instance's identity, applies `SHOP_URL_OVERRIDE`/`PORTAL_URL_OVERRIDE`/`API_URL_OVERRIDE`, proxies admin calls |
 
@@ -136,10 +136,15 @@ no per-record work.
 ## 4. The lifecycle
 
 1. **Register** — partner opens their lab-ui console → Settings → Lab
-   Identity → enters a name plus their own SentinelOne HEC URL + token →
+   Identity → enters a name, their own SentinelOne HEC URL + token, and the
+   **required** `site_label` (S1 site) + `account_label` (S1 account) that name
+   the destination behind the opaque HEC token (plus an optional
+   `s1_console_url` = the console/"purple" domain shown in the admin list) →
    frontend calls `POST /api/lab/register` on their backend, which calls
    `lab_identity.register()`, which POSTs to the relay's `/register` (gated by
-   `LAB_ENROLL_CODE`).
+   `LAB_ENROLL_CODE`). The relay rejects a registration missing either label
+   with a 400 — the HEC token itself carries no account/site identity, so it
+   must be captured here.
 2. **Assign** — the relay slugifies the name, creates/updates the KV row keyed
    on `<slug>.lab.soledrop.co`, and returns that subdomain + `shop_url`. The
    backend applies it as `SHOP_URL_OVERRIDE`/`PORTAL_URL_OVERRIDE`/

@@ -35,6 +35,12 @@ function tokenTail(tok) {
   return tail ? `…${tail}` : '••••'
 }
 
+// The destination host to show: the operator's S1 console ("purple") domain if
+// they provided one, else the region ingest host (all we can infer otherwise).
+function destHost(entry) {
+  return entry?.s1_console_url ? hecHost(entry.s1_console_url) : hecHost(entry?.s1_hec_url)
+}
+
 function StatusBadge({ status }) {
   const active = status === 'active'
   return (
@@ -192,17 +198,19 @@ function TenantsTable({ registry, onToggle, onDelete, actionBusy, selected, onTo
                 <StatusBadge status={entry.status} />
                 <span className="text-xs font-mono text-slate-400">{entry.forwarded ?? 0}</span>
                 <span className="text-xs font-mono text-slate-500 whitespace-nowrap">{formatTime(entry.last_seen)}</span>
-                <div className="text-xs font-mono text-slate-400 min-w-0">
-                  {entry.site_label && (
-                    <div className="text-slate-300 truncate mb-0.5">{entry.site_label}</div>
-                  )}
-                  <div
-                    className="text-slate-200 truncate"
-                    title={entry.s1_hec_url || ''}
-                  >
-                    {hecHost(entry.s1_hec_url)}
+                <div className="text-xs font-mono text-slate-400 min-w-0 space-y-0.5">
+                  <div className="truncate">
+                    <span className="text-slate-500">Site: </span>
+                    <span className="text-slate-200">{entry.site_label || '—'}</span>
                   </div>
-                  <div className="text-slate-500 truncate" title="HEC token (redacted)">
+                  <div className="truncate">
+                    <span className="text-slate-500">Account: </span>
+                    <span className="text-slate-200">{entry.account_label || '—'}</span>
+                  </div>
+                  <div className="text-slate-400 truncate" title={entry.s1_console_url || entry.s1_hec_url || ''}>
+                    {destHost(entry)}
+                  </div>
+                  <div className="text-slate-600 truncate" title="HEC token (redacted)">
                     token {tokenTail(entry.s1_hec_token)}
                   </div>
                 </div>

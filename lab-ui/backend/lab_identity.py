@@ -100,16 +100,27 @@ def register(
     s1_hec_url: str,
     s1_hec_token: str,
     site_label: Optional[str] = None,
+    account_label: Optional[str] = None,
+    s1_console_url: Optional[str] = None,
 ) -> dict:
     """Enroll this instance. Returns the identity dict.
 
     Raises ValueError on bad input, RuntimeError on a relay rejection.
+
+    site_label (S1 site) and account_label (S1 account) are required — they name
+    the real destination behind the opaque HEC token in the admin console.
+    s1_console_url (the console/"purple" domain) is optional display metadata.
     """
     slug = slugify(name)
     if not slug:
         raise ValueError("name did not produce a valid subdomain slug")
     if not s1_hec_url or not s1_hec_token:
         raise ValueError("s1_hec_url and s1_hec_token are required")
+    site_label = (site_label or "").strip()
+    account_label = (account_label or "").strip()
+    s1_console_url = (s1_console_url or "").strip()
+    if not site_label or not account_label:
+        raise ValueError("site_label (S1 site) and account_label (S1 account) are required")
 
     subdomain = f"{slug}.{LAB_DOMAIN}"
     shop_url = f"https://{subdomain}"
@@ -124,9 +135,11 @@ def register(
             "name": name,
             "s1_hec_url": s1_hec_url,
             "s1_hec_token": s1_hec_token,
+            "site_label": site_label,
+            "account_label": account_label,
         }
-        if site_label:
-            payload["site_label"] = site_label
+        if s1_console_url:
+            payload["s1_console_url"] = s1_console_url
         try:
             resp = httpx.post(
                 f"{base}/register",
@@ -155,6 +168,8 @@ def register(
         # persisted on this instance — the relay is the system of record.
         "s1_hec_url": s1_hec_url,
         "site_label": site_label or None,
+        "account_label": account_label or None,
+        "s1_console_url": s1_console_url or None,
     }
     _save_identity(ident)
     apply_identity(shop_url)
