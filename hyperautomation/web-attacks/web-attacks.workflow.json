@@ -1,0 +1,1036 @@
+{
+  "name": "OneFlare - Cloudflare WAF Web-Attack Response (SQLi / XSS / Traversal)",
+  "description": "Alert-triggered SOAR playbook covering the three Cloudflare WAF ML web-application detections on the soledrop.co zone: CF-WAF-SQLi, CF-WAF-XSS, and CF-WAF-Traversal (one parametrized workflow; trigger matches alert name contains 'CF-WAF-'). Flow: extract offending src_ip + alert context -> parallel enrichment (S1 PowerQuery for other CF security events from the same IP + VirusTotal IP reputation) -> decision gate (VT malicious OR >3 correlated events) -> BLOCK the src_ip at Cloudflare (zone IP Access rule) + add S1 IOC on a confirmed verdict, else non-destructive managed CHALLENGE -> annotate the alert, raise the analyst verdict, and notify SOC via Slack + email. run_automatically:false (analyst-approved). Destructive block is gated on a threat-intel/correlation verdict per evidence discipline.",
+  "actions": [
+    {
+      "action": {
+        "type": "singularity_response_trigger",
+        "tag": "core_action",
+        "connection_id": null,
+        "connection_name": null,
+        "use_connection_name": false,
+        "integration_id": null,
+        "data": {
+          "name": "Singularity Response Trigger",
+          "action_type": "singularity_response_trigger",
+          "filter_groups": [
+            {
+              "condition": {
+                "operator": "and",
+                "conditions": [
+                  {
+                    "input_value": "name",
+                    "compared_value": "CF-WAF-",
+                    "comparison_operator": "contains"
+                  },
+                  {
+                    "input_value": "severity",
+                    "compared_value": "[\"HIGH\",\"CRITICAL\"]",
+                    "comparison_operator": "in"
+                  }
+                ]
+              },
+              "is_disabled": false,
+              "run_automatically": false,
+              "event_type": "alert",
+              "event_subtypes": [
+                "CREATE"
+              ]
+            }
+          ]
+        },
+        "state": "active",
+        "description": "Fires on any Cloudflare WAF ML web-application detection: CF-WAF-SQLi, CF-WAF-XSS, or CF-WAF-Traversal (name contains 'CF-WAF-'). run_automatically:false = analyst-approved from the Singularity Response console.",
+        "client_data": {
+          "position": {
+            "x": 0,
+            "y": 0
+          },
+          "dimensions": {
+            "width": 256,
+            "height": 100
+          },
+          "collapsed": false
+        },
+        "snippet_workflow_id": null,
+        "snippet_version_id": null
+      },
+      "export_id": 17,
+      "connected_to": [
+        {
+          "target": 16,
+          "custom_handle": null
+        }
+      ],
+      "parent_action": null
+    },
+    {
+      "action": {
+        "type": "variable",
+        "tag": "core_action",
+        "connection_id": null,
+        "connection_name": null,
+        "use_connection_name": false,
+        "integration_id": null,
+        "data": {
+          "name": "Attacker Source IP",
+          "action_type": "variable",
+          "variables": [
+            {
+              "name": "attacker_ip",
+              "value": "{{Function.DEFAULT(Function.DEFAULT(singularity-response-trigger.data.src_ip, singularity-response-trigger.data.indicators[0].value), \"no-ip\")}}",
+              "should_use_as_output": false,
+              "is_secret": false
+            }
+          ],
+          "variables_scope": "local"
+        },
+        "state": "active",
+        "description": "Offending src_ip from the WAF alert (the rule projects column 'src_ip'; indicators[0].value is a fallback path). Reconcile against a real fired alert.",
+        "client_data": {
+          "position": {
+            "x": 0,
+            "y": 177
+          },
+          "dimensions": {
+            "width": 256,
+            "height": 76
+          },
+          "collapsed": false
+        },
+        "snippet_workflow_id": null,
+        "snippet_version_id": null
+      },
+      "export_id": 16,
+      "connected_to": [
+        {
+          "target": 15,
+          "custom_handle": null
+        }
+      ],
+      "parent_action": null
+    },
+    {
+      "action": {
+        "type": "variable",
+        "tag": "core_action",
+        "connection_id": null,
+        "connection_name": null,
+        "use_connection_name": false,
+        "integration_id": null,
+        "data": {
+          "name": "Alert Context",
+          "action_type": "variable",
+          "variables": [
+            {
+              "name": "host",
+              "value": "{{Function.DEFAULT(singularity-response-trigger.data.host, \"unknown-host\")}}",
+              "should_use_as_output": false,
+              "is_secret": false
+            },
+            {
+              "name": "sample_uri",
+              "value": "{{Function.DEFAULT(singularity-response-trigger.data.sample_uri, \"unknown-uri\")}}",
+              "should_use_as_output": false,
+              "is_secret": false
+            },
+            {
+              "name": "alert_name",
+              "value": "{{Function.DEFAULT(singularity-response-trigger.data.name, \"CF-WAF web attack\")}}",
+              "should_use_as_output": false,
+              "is_secret": false
+            },
+            {
+              "name": "lowest_score",
+              "value": "{{Function.DEFAULT(singularity-response-trigger.data.lowest_score, \"n/a\")}}",
+              "should_use_as_output": false,
+              "is_secret": false
+            },
+            {
+              "name": "attack_requests",
+              "value": "{{Function.DEFAULT(singularity-response-trigger.data.attack_requests, \"n/a\")}}",
+              "should_use_as_output": false,
+              "is_secret": false
+            },
+            {
+              "name": "country",
+              "value": "{{Function.DEFAULT(singularity-response-trigger.data.country, \"unknown\")}}",
+              "should_use_as_output": false,
+              "is_secret": false
+            }
+          ],
+          "variables_scope": "local"
+        },
+        "state": "active",
+        "description": "Host, worst offending URI, matched-rule name, WAF ML lowest (most-malicious) score, attack request count, country \u2014 all projected columns of the CF-WAF scheduled rules. Independent literals, so grouping them in one Variable action is safe (no cross-references).",
+        "client_data": {
+          "position": {
+            "x": 0,
+            "y": 354
+          },
+          "dimensions": {
+            "width": 256,
+            "height": 76
+          },
+          "collapsed": false
+        },
+        "snippet_workflow_id": null,
+        "snippet_version_id": null
+      },
+      "export_id": 15,
+      "connected_to": [
+        {
+          "target": 14,
+          "custom_handle": null
+        }
+      ],
+      "parent_action": null
+    },
+    {
+      "action": {
+        "type": "http_request",
+        "tag": "integration",
+        "connection_id": null,
+        "connection_name": "",
+        "use_connection_name": false,
+        "integration_id": null,
+        "data": {
+          "name": "Search Related S1 Events",
+          "action_type": "http_request",
+          "public_action_id": "sentinelone-sdl-powerquery",
+          "method": "post",
+          "url": "{{Connection.protocol}}{{Connection.url}}/api/<@powerQuery@>",
+          "url_path": null,
+          "url_prefix": null,
+          "payload": "{\n  \"query\": \"class_uid=4002 src_endpoint.ip='{{local_var.attacker_ip}}' | group related_events=count() | limit 1\",\n  \"startTime\": \"6h\",\n  \"endTime\": \"0h\"\n}",
+          "parameters": [],
+          "retry_on_status_code": null,
+          "retry_on_status_codes": [
+            500
+          ],
+          "ssl_verification": true,
+          "timeout": 30,
+          "headers": {
+            "Content-Type": "application/json"
+          },
+          "use_authentication_data": true,
+          "use_proxy": false,
+          "redirect_follow": true,
+          "continue_on_fail": true,
+          "body_type": null
+        },
+        "state": "active",
+        "description": "Correlation enrichment: count OTHER Cloudflare security events (class_uid 4002) from the same src_ip in the last 6h. MUST bind to the 'SentinelOne SDL' (Bearer) connection, NOT the ApiToken 'SentinelOne' one \u2014 LRQ/PowerQuery needs Bearer. continue_on_fail:true so an enrichment miss defaults to the non-destructive challenge path.",
+        "client_data": {
+          "position": {
+            "x": 0,
+            "y": 531
+          },
+          "dimensions": {
+            "width": 256,
+            "height": 76
+          },
+          "collapsed": false
+        },
+        "snippet_workflow_id": null,
+        "snippet_version_id": null
+      },
+      "export_id": 14,
+      "connected_to": [
+        {
+          "target": 13,
+          "custom_handle": null
+        }
+      ],
+      "parent_action": null
+    },
+    {
+      "action": {
+        "type": "variable",
+        "tag": "core_action",
+        "connection_id": null,
+        "connection_name": null,
+        "use_connection_name": false,
+        "integration_id": null,
+        "data": {
+          "name": "Correlated Event Count",
+          "action_type": "variable",
+          "variables": [
+            {
+              "name": "correlated_count",
+              "value": "{{Function.DEFAULT(Function.DEFAULT(search-related-s1-events.body.matches[0].related_events, search-related-s1-events.body.data.matchCount), \"0\")}}",
+              "should_use_as_output": false,
+              "is_secret": false
+            }
+          ],
+          "variables_scope": "local"
+        },
+        "state": "active",
+        "description": "Number of related CF security events from this src_ip. Response-shape paths are best-effort (DV vs LRQ differ); defaults to 0 on miss.",
+        "client_data": {
+          "position": {
+            "x": 0,
+            "y": 708
+          },
+          "dimensions": {
+            "width": 256,
+            "height": 76
+          },
+          "collapsed": false
+        },
+        "snippet_workflow_id": null,
+        "snippet_version_id": null
+      },
+      "export_id": 13,
+      "connected_to": [
+        {
+          "target": 12,
+          "custom_handle": null
+        }
+      ],
+      "parent_action": null
+    },
+    {
+      "action": {
+        "type": "http_request",
+        "tag": "core_action",
+        "connection_id": null,
+        "connection_name": null,
+        "use_connection_name": false,
+        "integration_id": null,
+        "data": {
+          "name": "VirusTotal IP Report",
+          "action_type": "http_request",
+          "public_action_id": null,
+          "method": "get",
+          "url": "https://www.virustotal.com/api/v3/ip_addresses/{{local_var.attacker_ip}}",
+          "url_path": null,
+          "url_prefix": null,
+          "payload": null,
+          "parameters": [],
+          "retry_on_status_code": null,
+          "retry_on_status_codes": [
+            429,
+            500
+          ],
+          "ssl_verification": true,
+          "timeout": 30,
+          "headers": {
+            "x-apikey": "<set-VT_API_KEY-after-import>",
+            "Content-Type": "application/json"
+          },
+          "use_authentication_data": false,
+          "use_proxy": false,
+          "redirect_follow": true,
+          "continue_on_fail": true,
+          "body_type": null
+        },
+        "state": "active",
+        "description": "IP-reputation enrichment of src_ip via VirusTotal v3. Set the x-apikey header to a VirusTotal API key after import (do not commit the key). continue_on_fail:true.",
+        "client_data": {
+          "position": {
+            "x": 0,
+            "y": 885
+          },
+          "dimensions": {
+            "width": 256,
+            "height": 76
+          },
+          "collapsed": false
+        },
+        "snippet_workflow_id": null,
+        "snippet_version_id": null
+      },
+      "export_id": 12,
+      "connected_to": [
+        {
+          "target": 11,
+          "custom_handle": null
+        }
+      ],
+      "parent_action": null
+    },
+    {
+      "action": {
+        "type": "variable",
+        "tag": "core_action",
+        "connection_id": null,
+        "connection_name": null,
+        "use_connection_name": false,
+        "integration_id": null,
+        "data": {
+          "name": "VT Malicious Count",
+          "action_type": "variable",
+          "variables": [
+            {
+              "name": "vt_malicious",
+              "value": "{{Function.DEFAULT(virustotal-ip-report.body.data.attributes.last_analysis_stats.malicious, \"0\")}}",
+              "should_use_as_output": false,
+              "is_secret": false
+            }
+          ],
+          "variables_scope": "local"
+        },
+        "state": "active",
+        "description": "VirusTotal malicious-engine count for src_ip; 0 when VT is clean, unconfigured, or the lookup failed.",
+        "client_data": {
+          "position": {
+            "x": 0,
+            "y": 1062
+          },
+          "dimensions": {
+            "width": 256,
+            "height": 76
+          },
+          "collapsed": false
+        },
+        "snippet_workflow_id": null,
+        "snippet_version_id": null
+      },
+      "export_id": 11,
+      "connected_to": [
+        {
+          "target": 10,
+          "custom_handle": null
+        }
+      ],
+      "parent_action": null
+    },
+    {
+      "action": {
+        "type": "condition",
+        "tag": "core_action",
+        "connection_id": null,
+        "connection_name": null,
+        "use_connection_name": false,
+        "integration_id": null,
+        "data": {
+          "name": "Reputation And Correlation Gate",
+          "action_type": "condition",
+          "condition_type": "multi",
+          "condition": null,
+          "conditions": [
+            {
+              "input_value": "{{local_var.vt_malicious}}",
+              "compared_value": "0",
+              "comparison_operator": "greater_than"
+            },
+            {
+              "input_value": "{{local_var.correlated_count}}",
+              "compared_value": "3",
+              "comparison_operator": "greater_than"
+            }
+          ],
+          "conditions_relationship": "or"
+        },
+        "state": "active",
+        "description": "Decision gate (evidence discipline): src_ip is BLOCKED only when threat-intel says malicious (VT malicious > 0) OR it is corroborated by >3 related CF security events. Otherwise a non-destructive managed challenge is applied.",
+        "client_data": {
+          "position": {
+            "x": 0,
+            "y": 1239
+          },
+          "dimensions": {
+            "width": 256,
+            "height": 76
+          },
+          "collapsed": false
+        },
+        "snippet_workflow_id": null,
+        "snippet_version_id": null
+      },
+      "export_id": 10,
+      "connected_to": [
+        {
+          "target": 9,
+          "custom_handle": "true"
+        },
+        {
+          "target": 6,
+          "custom_handle": "false"
+        }
+      ],
+      "parent_action": null
+    },
+    {
+      "action": {
+        "type": "variable",
+        "tag": "core_action",
+        "connection_id": null,
+        "connection_name": null,
+        "use_connection_name": false,
+        "integration_id": null,
+        "data": {
+          "name": "Set Block Verdict",
+          "action_type": "variable",
+          "variables": [
+            {
+              "name": "verdict",
+              "value": "malicious",
+              "should_use_as_output": false,
+              "is_secret": false
+            },
+            {
+              "name": "verdict_enum",
+              "value": "TRUE_POSITIVE",
+              "should_use_as_output": false,
+              "is_secret": false
+            },
+            {
+              "name": "response",
+              "value": "block (zone IP Access rule)",
+              "should_use_as_output": false,
+              "is_secret": false
+            },
+            {
+              "name": "risk",
+              "value": "90",
+              "should_use_as_output": false,
+              "is_secret": false
+            },
+            {
+              "name": "cf_mode",
+              "value": "block",
+              "should_use_as_output": false,
+              "is_secret": false
+            }
+          ],
+          "variables_scope": "local"
+        },
+        "state": "active",
+        "description": "Confirmed-malicious verdict metadata for the block path.",
+        "client_data": {
+          "position": {
+            "x": -260,
+            "y": 1416
+          },
+          "dimensions": {
+            "width": 256,
+            "height": 76
+          },
+          "collapsed": false
+        },
+        "snippet_workflow_id": null,
+        "snippet_version_id": null
+      },
+      "export_id": 9,
+      "connected_to": [
+        {
+          "target": 8,
+          "custom_handle": null
+        }
+      ],
+      "parent_action": null
+    },
+    {
+      "action": {
+        "type": "http_request",
+        "tag": "integration",
+        "connection_id": null,
+        "connection_name": "",
+        "use_connection_name": false,
+        "integration_id": null,
+        "data": {
+          "name": "Block Attacker IP At Cloudflare",
+          "action_type": "http_request",
+          "public_action_id": "cloudflare-create-ip-access-rule",
+          "method": "post",
+          "url": "{{Connection.protocol}}{{Connection.url}}/client/v4/zones/{{Connection.zone_id}}/firewall/access_rules",
+          "url_path": null,
+          "url_prefix": null,
+          "payload": "{\n  \"mode\": \"block\",\n  \"configuration\": { \"target\": \"ip\", \"value\": \"{{local_var.attacker_ip}}\" },\n  \"notes\": \"OneFlare auto-block: {{local_var.alert_name}} from {{local_var.attacker_ip}} on {{local_var.host}}. S1 alert {{singularity-response-trigger.data.id}}.\"\n}",
+          "parameters": [],
+          "retry_on_status_code": null,
+          "retry_on_status_codes": [
+            500
+          ],
+          "ssl_verification": true,
+          "timeout": 30,
+          "headers": {
+            "Content-Type": "application/json",
+            "accept": "application/json"
+          },
+          "use_authentication_data": true,
+          "use_proxy": false,
+          "redirect_follow": true,
+          "continue_on_fail": false,
+          "body_type": null
+        },
+        "state": "active",
+        "description": "Create a Cloudflare zone IP Access rule with mode=block for the attacker src_ip on the soledrop.co zone. Confirm the Cloudflare connection exposes {{Connection.zone_id}} or hardcode the zone id post-import.",
+        "client_data": {
+          "position": {
+            "x": -260,
+            "y": 1593
+          },
+          "dimensions": {
+            "width": 256,
+            "height": 76
+          },
+          "collapsed": false
+        },
+        "snippet_workflow_id": null,
+        "snippet_version_id": null
+      },
+      "export_id": 8,
+      "connected_to": [
+        {
+          "target": 7,
+          "custom_handle": null
+        }
+      ],
+      "parent_action": null
+    },
+    {
+      "action": {
+        "type": "http_request",
+        "tag": "integration",
+        "connection_id": null,
+        "connection_name": "",
+        "use_connection_name": false,
+        "integration_id": null,
+        "data": {
+          "name": "Add S1 IOC For Attacker IP",
+          "action_type": "http_request",
+          "public_action_id": "sentinelone-create-ioc",
+          "method": "post",
+          "url": "{{Connection.protocol}}{{Connection.url}}/web/api/v2.1/threat-intelligence/iocs",
+          "url_path": null,
+          "url_prefix": null,
+          "payload": "{\n  \"data\": [{\n    \"type\": \"IPV4\",\n    \"value\": \"{{local_var.attacker_ip}}\",\n    \"method\": \"EQUALS\",\n    \"source\": \"OneFlare Hyperautomation\",\n    \"name\": \"OneFlare CF-WAF web-attack origin\",\n    \"description\": \"Auto-added from {{local_var.alert_name}} (alert {{singularity-response-trigger.data.id}}); VT malicious {{local_var.vt_malicious}}, related CF events {{local_var.correlated_count}}.\",\n    \"category\": \"web-attack\",\n    \"externalId\": \"OneFlare\",\n    \"originalRiskScore\": \"{{local_var.risk}}\",\n    \"creationTime\": \"{{Function.DATETIME_NOW()}}\",\n    \"validUntil\": \"{{Function.DELTA_NOW(-168)}}\"\n  }],\n  \"filter\": { \"accountIds\": [\"{{singularity-response-trigger.data.scopeId}}\"] }\n}",
+          "parameters": [],
+          "retry_on_status_code": null,
+          "retry_on_status_codes": [
+            500
+          ],
+          "ssl_verification": true,
+          "timeout": 30,
+          "headers": {
+            "Content-Type": "application/json",
+            "accept": "application/json"
+          },
+          "use_authentication_data": true,
+          "use_proxy": false,
+          "redirect_follow": true,
+          "continue_on_fail": true,
+          "body_type": null
+        },
+        "state": "active",
+        "description": "Create an S1 IPV4 IOC for the confirmed-malicious attacker IP (7-day validity). Converges to Compose Alert Note.",
+        "client_data": {
+          "position": {
+            "x": -260,
+            "y": 1770
+          },
+          "dimensions": {
+            "width": 256,
+            "height": 76
+          },
+          "collapsed": false
+        },
+        "snippet_workflow_id": null,
+        "snippet_version_id": null
+      },
+      "export_id": 7,
+      "connected_to": [
+        {
+          "target": 4,
+          "custom_handle": null
+        }
+      ],
+      "parent_action": null
+    },
+    {
+      "action": {
+        "type": "variable",
+        "tag": "core_action",
+        "connection_id": null,
+        "connection_name": null,
+        "use_connection_name": false,
+        "integration_id": null,
+        "data": {
+          "name": "Set Challenge Verdict",
+          "action_type": "variable",
+          "variables": [
+            {
+              "name": "verdict",
+              "value": "suspicious",
+              "should_use_as_output": false,
+              "is_secret": false
+            },
+            {
+              "name": "verdict_enum",
+              "value": "SUSPICIOUS",
+              "should_use_as_output": false,
+              "is_secret": false
+            },
+            {
+              "name": "response",
+              "value": "managed_challenge (zone IP Access rule)",
+              "should_use_as_output": false,
+              "is_secret": false
+            },
+            {
+              "name": "risk",
+              "value": "50",
+              "should_use_as_output": false,
+              "is_secret": false
+            },
+            {
+              "name": "cf_mode",
+              "value": "managed_challenge",
+              "should_use_as_output": false,
+              "is_secret": false
+            }
+          ],
+          "variables_scope": "local"
+        },
+        "state": "active",
+        "description": "Suspicious-pending-confirmation verdict metadata for the non-destructive challenge path.",
+        "client_data": {
+          "position": {
+            "x": 260,
+            "y": 1416
+          },
+          "dimensions": {
+            "width": 256,
+            "height": 76
+          },
+          "collapsed": false
+        },
+        "snippet_workflow_id": null,
+        "snippet_version_id": null
+      },
+      "export_id": 6,
+      "connected_to": [
+        {
+          "target": 5,
+          "custom_handle": null
+        }
+      ],
+      "parent_action": null
+    },
+    {
+      "action": {
+        "type": "http_request",
+        "tag": "integration",
+        "connection_id": null,
+        "connection_name": "",
+        "use_connection_name": false,
+        "integration_id": null,
+        "data": {
+          "name": "Challenge Attacker IP At Cloudflare",
+          "action_type": "http_request",
+          "public_action_id": "cloudflare-create-ip-access-rule",
+          "method": "post",
+          "url": "{{Connection.protocol}}{{Connection.url}}/client/v4/zones/{{Connection.zone_id}}/firewall/access_rules",
+          "url_path": null,
+          "url_prefix": null,
+          "payload": "{\n  \"mode\": \"managed_challenge\",\n  \"configuration\": { \"target\": \"ip\", \"value\": \"{{local_var.attacker_ip}}\" },\n  \"notes\": \"OneFlare auto-challenge (unconfirmed): {{local_var.alert_name}} from {{local_var.attacker_ip}} on {{local_var.host}}. S1 alert {{singularity-response-trigger.data.id}}.\"\n}",
+          "parameters": [],
+          "retry_on_status_code": null,
+          "retry_on_status_codes": [
+            500
+          ],
+          "ssl_verification": true,
+          "timeout": 30,
+          "headers": {
+            "Content-Type": "application/json",
+            "accept": "application/json"
+          },
+          "use_authentication_data": true,
+          "use_proxy": false,
+          "redirect_follow": true,
+          "continue_on_fail": false,
+          "body_type": null
+        },
+        "state": "active",
+        "description": "Create a Cloudflare zone IP Access rule with mode=managed_challenge (Turnstile interstitial) for the src_ip. Non-destructive: keeps humans/false-positives reachable while raising cost for the attacker. Converges to Compose Alert Note.",
+        "client_data": {
+          "position": {
+            "x": 260,
+            "y": 1593
+          },
+          "dimensions": {
+            "width": 256,
+            "height": 76
+          },
+          "collapsed": false
+        },
+        "snippet_workflow_id": null,
+        "snippet_version_id": null
+      },
+      "export_id": 5,
+      "connected_to": [
+        {
+          "target": 4,
+          "custom_handle": null
+        }
+      ],
+      "parent_action": null
+    },
+    {
+      "action": {
+        "type": "variable",
+        "tag": "core_action",
+        "connection_id": null,
+        "connection_name": null,
+        "use_connection_name": false,
+        "integration_id": null,
+        "data": {
+          "name": "Compose Alert Note",
+          "action_type": "variable",
+          "variables": [
+            {
+              "name": "note_body",
+              "value": "OneFlare auto-response for {{local_var.alert_name}}. Attacker IP {{local_var.attacker_ip}} ({{local_var.country}}) targeted {{local_var.host}}{{local_var.sample_uri}} - WAF ML lowest score {{local_var.lowest_score}}, {{local_var.attack_requests}} attack requests. Related CF security events from this IP (6h): {{local_var.correlated_count}}. VirusTotal malicious verdicts: {{local_var.vt_malicious}}. Verdict: {{local_var.verdict}}. Response: {{local_var.response}} on the soledrop.co Cloudflare zone. S1 alert {{singularity-response-trigger.data.id}}.",
+              "should_use_as_output": false,
+              "is_secret": false
+            }
+          ],
+          "variables_scope": "local"
+        },
+        "state": "active",
+        "description": "Assemble the analyst note body from the enrichment + verdict variables. Read after convergence so whichever branch ran has populated verdict/response.",
+        "client_data": {
+          "position": {
+            "x": 0,
+            "y": 1947
+          },
+          "dimensions": {
+            "width": 256,
+            "height": 76
+          },
+          "collapsed": false
+        },
+        "snippet_workflow_id": null,
+        "snippet_version_id": null
+      },
+      "export_id": 4,
+      "connected_to": [
+        {
+          "target": 3,
+          "custom_handle": null
+        }
+      ],
+      "parent_action": null
+    },
+    {
+      "action": {
+        "type": "http_request",
+        "tag": "integration",
+        "connection_id": null,
+        "connection_name": "",
+        "use_connection_name": false,
+        "integration_id": null,
+        "data": {
+          "name": "Add Alert Note",
+          "action_type": "http_request",
+          "public_action_id": "sentinelone-add-alert-note",
+          "method": "post",
+          "url": "{{Connection.protocol}}{{Connection.url}}/web/api/v2.1/unifiedalerts/graphql",
+          "url_path": null,
+          "url_prefix": null,
+          "payload": "{\n  \"query\": \"mutation AddAlertNote { addAlertNote(text: \\\"{{Function.HTML_ENCODE(local_var.note_body)}}\\\", alertId: \\\"{{singularity-response-trigger.data.id}}\\\") { data { alertId } } }\"\n}",
+          "parameters": [],
+          "retry_on_status_code": null,
+          "retry_on_status_codes": [
+            500
+          ],
+          "ssl_verification": true,
+          "timeout": 30,
+          "headers": {
+            "Content-Type": "application/json"
+          },
+          "use_authentication_data": true,
+          "use_proxy": false,
+          "redirect_follow": true,
+          "continue_on_fail": true,
+          "body_type": null
+        },
+        "state": "active",
+        "description": "Annotate the S1 alert with the finding summary via the UAM GraphQL addAlertNote mutation. Note body is HTML_ENCODEd (quote-safe).",
+        "client_data": {
+          "position": {
+            "x": 0,
+            "y": 2124
+          },
+          "dimensions": {
+            "width": 256,
+            "height": 76
+          },
+          "collapsed": false
+        },
+        "snippet_workflow_id": null,
+        "snippet_version_id": null
+      },
+      "export_id": 3,
+      "connected_to": [
+        {
+          "target": 2,
+          "custom_handle": null
+        }
+      ],
+      "parent_action": null
+    },
+    {
+      "action": {
+        "type": "http_request",
+        "tag": "integration",
+        "connection_id": null,
+        "connection_name": "",
+        "use_connection_name": false,
+        "integration_id": null,
+        "data": {
+          "name": "Raise Alert Verdict",
+          "action_type": "http_request",
+          "public_action_id": "sentinelone-update-alert-verdict",
+          "method": "post",
+          "url": "{{Connection.protocol}}{{Connection.url}}/web/api/v2.1/unifiedalerts/graphql",
+          "url_path": null,
+          "url_prefix": null,
+          "payload": "{\n  \"query\": \"mutation UpdateVerdict { updateAlertAnalystVerdict(alertId: \\\"{{singularity-response-trigger.data.id}}\\\", analystVerdict: \\\"{{local_var.verdict_enum}}\\\") { data { alertId } } }\"\n}",
+          "parameters": [],
+          "retry_on_status_code": null,
+          "retry_on_status_codes": [
+            500
+          ],
+          "ssl_verification": true,
+          "timeout": 30,
+          "headers": {
+            "Content-Type": "application/json"
+          },
+          "use_authentication_data": true,
+          "use_proxy": false,
+          "redirect_follow": true,
+          "continue_on_fail": true,
+          "body_type": null
+        },
+        "state": "active",
+        "description": "Raise the alert analyst verdict (TRUE_POSITIVE on block, SUSPICIOUS on challenge). BEST-EFFORT: the exact UAM verdict mutation name must be confirmed against the tenant's unifiedalerts GraphQL schema; continue_on_fail:true so the workflow completes regardless.",
+        "client_data": {
+          "position": {
+            "x": 0,
+            "y": 2301
+          },
+          "dimensions": {
+            "width": 256,
+            "height": 76
+          },
+          "collapsed": false
+        },
+        "snippet_workflow_id": null,
+        "snippet_version_id": null
+      },
+      "export_id": 2,
+      "connected_to": [
+        {
+          "target": 1,
+          "custom_handle": null
+        }
+      ],
+      "parent_action": null
+    },
+    {
+      "action": {
+        "type": "http_request",
+        "tag": "integration",
+        "connection_id": null,
+        "connection_name": "",
+        "use_connection_name": false,
+        "integration_id": null,
+        "data": {
+          "name": "Notify SOC Slack",
+          "action_type": "http_request",
+          "public_action_id": "slack-post-message",
+          "method": "post",
+          "url": "https://slack.com/api/chat.postMessage",
+          "url_path": null,
+          "url_prefix": null,
+          "payload": "{\n  \"channel\": \"#oneflare-soc\",\n  \"text\": \"OneFlare web-attack response ({{local_var.verdict}}): {{local_var.alert_name}} from {{local_var.attacker_ip}} on {{local_var.host}}{{local_var.sample_uri}}. Cloudflare action: {{local_var.response}}. VT malicious {{local_var.vt_malicious}}, related CF events {{local_var.correlated_count}}. S1 alert {{singularity-response-trigger.data.id}}.\"\n}",
+          "parameters": [],
+          "retry_on_status_code": null,
+          "retry_on_status_codes": [
+            500
+          ],
+          "ssl_verification": true,
+          "timeout": 30,
+          "headers": {
+            "Content-Type": "application/json"
+          },
+          "use_authentication_data": true,
+          "use_proxy": false,
+          "redirect_follow": true,
+          "continue_on_fail": true,
+          "body_type": null
+        },
+        "state": "active",
+        "description": "Post the containment summary to the SOC Slack channel.",
+        "client_data": {
+          "position": {
+            "x": 0,
+            "y": 2478
+          },
+          "dimensions": {
+            "width": 256,
+            "height": 76
+          },
+          "collapsed": false
+        },
+        "snippet_workflow_id": null,
+        "snippet_version_id": null
+      },
+      "export_id": 1,
+      "connected_to": [
+        {
+          "target": 0,
+          "custom_handle": null
+        }
+      ],
+      "parent_action": null
+    },
+    {
+      "action": {
+        "type": "send_email",
+        "tag": "core_action",
+        "connection_id": null,
+        "connection_name": null,
+        "use_connection_name": false,
+        "integration_id": null,
+        "data": {
+          "name": "Send Email",
+          "action_type": "send_email",
+          "subject": "[OneFlare] CF-WAF web attack contained - {{local_var.attacker_ip}}",
+          "to": [
+            "soc@soledrop.co"
+          ],
+          "cc": [],
+          "bcc": [],
+          "reply_to": [],
+          "mime_type": "text/html",
+          "body": "<!DOCTYPE html><html><body><h3>OneFlare Web-Attack Response</h3><p>Alert {{singularity-response-trigger.data.id}} - {{local_var.alert_name}}</p><ul><li>Attacker IP: {{local_var.attacker_ip}} ({{local_var.country}})</li><li>Target: {{local_var.host}}{{local_var.sample_uri}}</li><li>WAF ML lowest score: {{local_var.lowest_score}} over {{local_var.attack_requests}} requests</li><li>Related CF events (6h): {{local_var.correlated_count}}</li><li>VirusTotal malicious verdicts: {{local_var.vt_malicious}}</li><li>Verdict: {{local_var.verdict}}</li><li>Cloudflare response: {{local_var.response}}</li></ul></body></html>",
+          "attachments": [],
+          "continue_on_fail": true
+        },
+        "state": "active",
+        "description": "Email the SOC a containment receipt. Terminal action.",
+        "client_data": {
+          "position": {
+            "x": 0,
+            "y": 2655
+          },
+          "dimensions": {
+            "width": 256,
+            "height": 76
+          },
+          "collapsed": false
+        },
+        "snippet_workflow_id": null,
+        "snippet_version_id": null
+      },
+      "export_id": 0,
+      "connected_to": [],
+      "parent_action": null
+    }
+  ]
+}

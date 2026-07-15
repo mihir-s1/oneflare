@@ -1,0 +1,675 @@
+{
+  "name": "NovaMind Data-Exfil Response - api.novamind.ai Bulk Export / Endpoint Enumeration",
+  "description": "Fires on the CF-API-Exfil scheduled STAR detection (class_uid 4002, 'HTTP Requests') for bulk data pull / sensitive-endpoint enumeration against api.novamind.ai. Highest-severity scenario. Extracts the offending src_ip, runs parallel-intent enrichment (an S1 SDL PowerQuery for the same IP's other API activity + the authenticated caller it used, plus VirusTotal + AbuseIPDB reputation), then on a resolved IP contains the source (Cloudflare firewall rule blocking the data-export routes + zone IP access block), writes a rich S1 alert note, adds an S1 IOC, raises the analyst verdict, and pages the SOC. A second reputation gate (VT malicious > 0 OR AbuseIPDB confidence >= 50) escalates to an account-level global edge block, flags the compromised API credential on the NovaMind Worker, and sends a CRITICAL escalation email; otherwise a 'contained, monitoring' email is sent. run_automatically is false (surfaces as analyst-approved in Singularity Response). MITRE T1530 / T1119 / T1567.",
+  "actions": [
+    {
+      "action": {
+        "type": "singularity_response_trigger",
+        "tag": "core_action",
+        "connection_id": null,
+        "connection_name": null,
+        "use_connection_name": false,
+        "integration_id": null,
+        "data": {
+          "name": "Singularity Response Trigger",
+          "action_type": "singularity_response_trigger",
+          "filter_groups": [
+            {
+              "condition": {
+                "operator": "and",
+                "conditions": [
+                  { "input_value": "name", "compared_value": "CF-API-Exfil", "comparison_operator": "contains" },
+                  { "input_value": "severity", "compared_value": "[\"HIGH\",\"CRITICAL\"]", "comparison_operator": "in" }
+                ]
+              },
+              "is_disabled": false,
+              "run_automatically": false,
+              "event_type": "alert",
+              "event_subtypes": ["CREATE"]
+            }
+          ]
+        },
+        "state": "active",
+        "description": "Bulk data exfiltration / sensitive-endpoint enumeration on api.novamind.ai (CF-API-Exfil scheduled rule).",
+        "client_data": { "position": { "x": 0, "y": 0 }, "dimensions": { "width": 256, "height": 100 }, "collapsed": false },
+        "snippet_workflow_id": null,
+        "snippet_version_id": null
+      },
+      "export_id": 18,
+      "connected_to": [{ "target": 17, "custom_handle": null }],
+      "parent_action": null
+    },
+    {
+      "action": {
+        "type": "variable",
+        "tag": "core_action",
+        "connection_id": null,
+        "connection_name": null,
+        "use_connection_name": false,
+        "integration_id": null,
+        "data": {
+          "name": "Attacker Source IP",
+          "action_type": "variable",
+          "variables": [
+            { "name": "client_ip", "value": "{{Function.DEFAULT(singularity-response-trigger.data.indicators[0].value, \"no-ip\")}}", "should_use_as_output": false, "is_secret": false }
+          ],
+          "variables_scope": "local"
+        },
+        "state": "active",
+        "description": "Source IP of the exfil (from the alert's src_ip indicator). Falls back to 'no-ip' if absent.",
+        "client_data": { "position": { "x": 0, "y": 177 }, "dimensions": { "width": 256, "height": 76 }, "collapsed": false },
+        "snippet_workflow_id": null,
+        "snippet_version_id": null
+      },
+      "export_id": 17,
+      "connected_to": [{ "target": 16, "custom_handle": null }],
+      "parent_action": null
+    },
+    {
+      "action": {
+        "type": "http_request",
+        "tag": "integration",
+        "connection_id": null,
+        "connection_name": "",
+        "use_connection_name": false,
+        "integration_id": null,
+        "data": {
+          "name": "Search Related API Activity",
+          "action_type": "http_request",
+          "public_action_id": "sentinelone-sdl-powerquery",
+          "method": "post",
+          "url": "{{Connection.protocol}}{{Connection.url}}/sdl/v2/api/queries",
+          "url_path": null,
+          "url_prefix": null,
+          "payload": "{\n  \"queryType\": \"PQ\",\n  \"startTime\": \"{{Function.DELTA_NOW(24)}}\",\n  \"endTime\": \"{{Function.DATETIME_NOW()}}\",\n  \"queryPriority\": \"HIGH\",\n  \"pq\": {\n    \"query\": \"class_uid=4002 src_endpoint.ip='{{local_var.client_ip}}' | group api_calls=count(), auth_user=array_agg_distinct(actor.user.name), user_agents=array_agg_distinct(http_request.user_agent), paths=array_agg_distinct(http_request.url.path), total_bytes=sum(number(unmapped.EdgeResponseBytes)) by src_endpoint.ip | limit 100\",\n    \"resultType\": \"TABLE\"\n  },\n  \"tenant\": true\n}",
+          "parameters": [],
+          "retry_on_status_code": null,
+          "retry_on_status_codes": [500],
+          "ssl_verification": true,
+          "timeout": 30,
+          "headers": { "Content-Type": "application/json", "accept": "application/json" },
+          "use_authentication_data": true,
+          "use_proxy": false,
+          "redirect_follow": true,
+          "continue_on_fail": true,
+          "body_type": null
+        },
+        "state": "active",
+        "description": "Enrichment (a): LRQ launch — the same src_ip's other API activity, the authenticated caller (actor.user.name), user-agents/tokens, distinct paths and total bytes over 24h. Requires the SentinelOne SDL (Bearer) connection, not the ApiToken one. Best-effort (continue_on_fail).",
+        "client_data": { "position": { "x": -280, "y": 354 }, "dimensions": { "width": 256, "height": 76 }, "collapsed": false },
+        "snippet_workflow_id": null,
+        "snippet_version_id": null
+      },
+      "export_id": 16,
+      "connected_to": [{ "target": 15, "custom_handle": null }],
+      "parent_action": null
+    },
+    {
+      "action": {
+        "type": "http_request",
+        "tag": "core_action",
+        "connection_id": null,
+        "connection_name": null,
+        "use_connection_name": false,
+        "integration_id": null,
+        "data": {
+          "name": "VirusTotal IP Report",
+          "action_type": "http_request",
+          "public_action_id": null,
+          "method": "get",
+          "url": "https://www.virustotal.com/api/v3/ip_addresses/{{local_var.client_ip}}",
+          "url_path": null,
+          "url_prefix": null,
+          "payload": null,
+          "parameters": [],
+          "retry_on_status_code": null,
+          "retry_on_status_codes": [500],
+          "ssl_verification": true,
+          "timeout": 30,
+          "headers": { "x-apikey": "<set-VIRUSTOTAL_API_KEY-after-import>", "Content-Type": "application/json" },
+          "use_authentication_data": false,
+          "use_proxy": false,
+          "redirect_follow": true,
+          "continue_on_fail": true,
+          "body_type": null
+        },
+        "state": "active",
+        "description": "Enrichment (b1): VirusTotal reputation of the source IP. Set the x-apikey header after import. Best-effort.",
+        "client_data": { "position": { "x": 0, "y": 354 }, "dimensions": { "width": 256, "height": 76 }, "collapsed": false },
+        "snippet_workflow_id": null,
+        "snippet_version_id": null
+      },
+      "export_id": 15,
+      "connected_to": [{ "target": 14, "custom_handle": null }],
+      "parent_action": null
+    },
+    {
+      "action": {
+        "type": "http_request",
+        "tag": "core_action",
+        "connection_id": null,
+        "connection_name": null,
+        "use_connection_name": false,
+        "integration_id": null,
+        "data": {
+          "name": "AbuseIPDB Check",
+          "action_type": "http_request",
+          "public_action_id": null,
+          "method": "get",
+          "url": "https://api.abuseipdb.com/api/v2/check",
+          "url_path": null,
+          "url_prefix": null,
+          "payload": null,
+          "parameters": [
+            { "key": "ipAddress", "value": "{{local_var.client_ip}}" },
+            { "key": "maxAgeInDays", "value": "90" }
+          ],
+          "retry_on_status_code": null,
+          "retry_on_status_codes": [500],
+          "ssl_verification": true,
+          "timeout": 30,
+          "headers": { "Key": "<set-ABUSEIPDB_API_KEY-after-import>", "Accept": "application/json" },
+          "use_authentication_data": false,
+          "use_proxy": false,
+          "redirect_follow": true,
+          "continue_on_fail": true,
+          "body_type": null
+        },
+        "state": "active",
+        "description": "Enrichment (b2): AbuseIPDB confidence-of-abuse for the source IP. Set the Key header after import. Best-effort.",
+        "client_data": { "position": { "x": 0, "y": 531 }, "dimensions": { "width": 256, "height": 76 }, "collapsed": false },
+        "snippet_workflow_id": null,
+        "snippet_version_id": null
+      },
+      "export_id": 14,
+      "connected_to": [{ "target": 13, "custom_handle": null }],
+      "parent_action": null
+    },
+    {
+      "action": {
+        "type": "variable",
+        "tag": "core_action",
+        "connection_id": null,
+        "connection_name": null,
+        "use_connection_name": false,
+        "integration_id": null,
+        "data": {
+          "name": "VT Malicious Count",
+          "action_type": "variable",
+          "variables": [
+            { "name": "vt_malicious", "value": "{{Function.DEFAULT(virustotal-ip-report.body.data.attributes.last_analysis_stats.malicious, \"0\")}}", "should_use_as_output": false, "is_secret": false }
+          ],
+          "variables_scope": "local"
+        },
+        "state": "active",
+        "description": "Number of VT engines flagging the source IP as malicious (default 0 if the lookup failed).",
+        "client_data": { "position": { "x": 0, "y": 708 }, "dimensions": { "width": 256, "height": 76 }, "collapsed": false },
+        "snippet_workflow_id": null,
+        "snippet_version_id": null
+      },
+      "export_id": 13,
+      "connected_to": [{ "target": 12, "custom_handle": null }],
+      "parent_action": null
+    },
+    {
+      "action": {
+        "type": "variable",
+        "tag": "core_action",
+        "connection_id": null,
+        "connection_name": null,
+        "use_connection_name": false,
+        "integration_id": null,
+        "data": {
+          "name": "Abuse Confidence Score",
+          "action_type": "variable",
+          "variables": [
+            { "name": "abuse_score", "value": "{{Function.DEFAULT(abuseipdb-check.body.data.abuseConfidenceScore, \"0\")}}", "should_use_as_output": false, "is_secret": false }
+          ],
+          "variables_scope": "local"
+        },
+        "state": "active",
+        "description": "AbuseIPDB confidence-of-abuse score 0-100 (default 0 if the lookup failed).",
+        "client_data": { "position": { "x": 0, "y": 885 }, "dimensions": { "width": 256, "height": 76 }, "collapsed": false },
+        "snippet_workflow_id": null,
+        "snippet_version_id": null
+      },
+      "export_id": 12,
+      "connected_to": [{ "target": 11, "custom_handle": null }],
+      "parent_action": null
+    },
+    {
+      "action": {
+        "type": "condition",
+        "tag": "core_action",
+        "connection_id": null,
+        "connection_name": null,
+        "use_connection_name": false,
+        "integration_id": null,
+        "data": {
+          "name": "IP Resolved",
+          "action_type": "condition",
+          "condition_type": "multi",
+          "condition": null,
+          "conditions": [
+            { "input_value": "{{local_var.client_ip}}", "compared_value": "no-ip", "comparison_operator": "not_equals" }
+          ],
+          "conditions_relationship": "and"
+        },
+        "state": "active",
+        "description": "Gate all containment on a real source IP. The detection's own volume floors (sensitive_hits >= 10 OR max_bytes >= 1 MiB) are the exfil evidence; reputation escalation is a second gate downstream.",
+        "client_data": { "position": { "x": 0, "y": 1062 }, "dimensions": { "width": 256, "height": 76 }, "collapsed": false },
+        "snippet_workflow_id": null,
+        "snippet_version_id": null
+      },
+      "export_id": 11,
+      "connected_to": [{ "target": 10, "custom_handle": "true" }],
+      "parent_action": null
+    },
+    {
+      "action": {
+        "type": "http_request",
+        "tag": "integration",
+        "connection_id": null,
+        "connection_name": "",
+        "use_connection_name": false,
+        "integration_id": null,
+        "data": {
+          "name": "Block Exfil Routes For IP",
+          "action_type": "http_request",
+          "public_action_id": "cloudflare-create-firewall-rules",
+          "method": "post",
+          "url": "{{Connection.protocol}}{{Connection.url}}/client/v4/zones/{{Connection.zone_id}}/firewall/rules",
+          "url_path": null,
+          "url_prefix": null,
+          "payload": "[{\n  \"action\": \"block\",\n  \"description\": \"NovaMind exfil - block data-export routes for source IP (alert {{singularity-response-trigger.data.id}})\",\n  \"filter\": { \"expression\": \"(ip.src eq {{local_var.client_ip}} and (http.request.uri.path contains \\\"/export\\\" or http.request.uri.path contains \\\"/download\\\" or http.request.uri.path contains \\\"/api/v1/customers/export\\\"))\" }\n}]",
+          "parameters": [],
+          "retry_on_status_code": null,
+          "retry_on_status_codes": [500],
+          "ssl_verification": true,
+          "timeout": 30,
+          "headers": { "Content-Type": "application/json", "accept": "application/json" },
+          "use_authentication_data": true,
+          "use_proxy": false,
+          "redirect_follow": true,
+          "continue_on_fail": false,
+          "body_type": null
+        },
+        "state": "active",
+        "description": "Cloudflare firewall rule blocking the data-export routes (/export, /download, /api/v1/customers/export) for the source IP on the api.novamind.ai zone. Stops the bleed without a full zone ban.",
+        "client_data": { "position": { "x": 0, "y": 1239 }, "dimensions": { "width": 256, "height": 76 }, "collapsed": false },
+        "snippet_workflow_id": null,
+        "snippet_version_id": null
+      },
+      "export_id": 10,
+      "connected_to": [{ "target": 9, "custom_handle": null }],
+      "parent_action": null
+    },
+    {
+      "action": {
+        "type": "http_request",
+        "tag": "integration",
+        "connection_id": null,
+        "connection_name": "",
+        "use_connection_name": false,
+        "integration_id": null,
+        "data": {
+          "name": "Block Source IP At Zone",
+          "action_type": "http_request",
+          "public_action_id": "cloudflare-create-ip-access-rule",
+          "method": "post",
+          "url": "{{Connection.protocol}}{{Connection.url}}/client/v4/zones/{{Connection.zone_id}}/firewall/access_rules/rules",
+          "url_path": null,
+          "url_prefix": null,
+          "payload": "{\n  \"mode\": \"block\",\n  \"configuration\": { \"target\": \"ip\", \"value\": \"{{local_var.client_ip}}\" },\n  \"notes\": \"NovaMind data-exfil auto-block - alert {{singularity-response-trigger.data.id}}\"\n}",
+          "parameters": [],
+          "retry_on_status_code": null,
+          "retry_on_status_codes": [500],
+          "ssl_verification": true,
+          "timeout": 30,
+          "headers": { "Content-Type": "application/json", "accept": "application/json" },
+          "use_authentication_data": true,
+          "use_proxy": false,
+          "redirect_follow": true,
+          "continue_on_fail": false,
+          "body_type": null
+        },
+        "state": "active",
+        "description": "Zone-level IP access rule blocking the exfil source across the whole api.novamind.ai zone.",
+        "client_data": { "position": { "x": 0, "y": 1416 }, "dimensions": { "width": 256, "height": 76 }, "collapsed": false },
+        "snippet_workflow_id": null,
+        "snippet_version_id": null
+      },
+      "export_id": 9,
+      "connected_to": [{ "target": 8, "custom_handle": null }],
+      "parent_action": null
+    },
+    {
+      "action": {
+        "type": "http_request",
+        "tag": "integration",
+        "connection_id": null,
+        "connection_name": "",
+        "use_connection_name": false,
+        "integration_id": null,
+        "data": {
+          "name": "Add S1 Alert Note",
+          "action_type": "http_request",
+          "public_action_id": "sentinelone-add-alert-note",
+          "method": "post",
+          "url": "{{Connection.protocol}}{{Connection.url}}/web/api/v2.1/unifiedalerts/graphql",
+          "url_path": null,
+          "url_prefix": null,
+          "payload": "{\n  \"query\": \"mutation AddAlertNote { addAlertNote(text: \\\"Data-exfil containment for src_ip {{local_var.client_ip}} (host api.novamind.ai) | VT malicious={{local_var.vt_malicious}} AbuseIPDB={{local_var.abuse_score}} | Cloudflare: data-export routes + zone IP blocked. Exfil endpoint + bytes are in the alert columns (largest_uri, max_bytes, sensitive_hits). See the Search Related API Activity LRQ for the authenticated caller (actor.user.name) and correlated calls.\\\", alertId: \\\"{{singularity-response-trigger.data.id}}\\\") { data { alertId } } }\"\n}",
+          "parameters": [],
+          "retry_on_status_code": null,
+          "retry_on_status_codes": [500],
+          "ssl_verification": true,
+          "timeout": 30,
+          "headers": { "Content-Type": "application/json", "accept": "application/json" },
+          "use_authentication_data": true,
+          "use_proxy": false,
+          "redirect_follow": true,
+          "continue_on_fail": true,
+          "body_type": null
+        },
+        "state": "active",
+        "description": "Write a rich S1 alert note (UAM GraphQL addAlertNote): source IP, exfil endpoint, VT + AbuseIPDB verdicts, Cloudflare actions taken, and a pointer to the LRQ that resolves the compromised credential.",
+        "client_data": { "position": { "x": 0, "y": 1593 }, "dimensions": { "width": 256, "height": 76 }, "collapsed": false },
+        "snippet_workflow_id": null,
+        "snippet_version_id": null
+      },
+      "export_id": 8,
+      "connected_to": [{ "target": 7, "custom_handle": null }],
+      "parent_action": null
+    },
+    {
+      "action": {
+        "type": "http_request",
+        "tag": "integration",
+        "connection_id": null,
+        "connection_name": "",
+        "use_connection_name": false,
+        "integration_id": null,
+        "data": {
+          "name": "Add S1 IOC",
+          "action_type": "http_request",
+          "public_action_id": "sentinelone-create-ioc",
+          "method": "post",
+          "url": "{{Connection.protocol}}{{Connection.url}}/web/api/v2.1/threat-intelligence/iocs",
+          "url_path": null,
+          "url_prefix": null,
+          "payload": "{\n  \"data\": [{\n    \"type\": \"IPV4\",\n    \"value\": \"{{local_var.client_ip}}\",\n    \"method\": \"EQUALS\",\n    \"source\": \"NovaMind Hyperautomation\",\n    \"name\": \"NovaMind data-exfil origin\",\n    \"description\": \"Auto-added from CF-API-Exfil alert {{singularity-response-trigger.data.id}} (bulk export / sensitive-endpoint enumeration on api.novamind.ai). VT malicious={{local_var.vt_malicious}} AbuseIPDB={{local_var.abuse_score}}\",\n    \"category\": \"exfiltration\",\n    \"externalId\": \"NovaMind-Exfil\",\n    \"originalRiskScore\": \"95\",\n    \"creationTime\": \"{{Function.DATETIME_NOW()}}\",\n    \"validUntil\": \"{{Function.DELTA_NOW(-168)}}\"\n  }],\n  \"filter\": { \"accountIds\": [\"{{singularity-response-trigger.data.scopeId}}\"] }\n}",
+          "parameters": [],
+          "retry_on_status_code": null,
+          "retry_on_status_codes": [500],
+          "ssl_verification": true,
+          "timeout": 30,
+          "headers": { "Content-Type": "application/json", "accept": "application/json" },
+          "use_authentication_data": true,
+          "use_proxy": false,
+          "redirect_follow": true,
+          "continue_on_fail": true,
+          "body_type": null
+        },
+        "state": "active",
+        "description": "Create an S1 IOC (IPV4, exfiltration category) for the source IP, valid 7 days.",
+        "client_data": { "position": { "x": 0, "y": 1770 }, "dimensions": { "width": 256, "height": 76 }, "collapsed": false },
+        "snippet_workflow_id": null,
+        "snippet_version_id": null
+      },
+      "export_id": 7,
+      "connected_to": [{ "target": 6, "custom_handle": null }],
+      "parent_action": null
+    },
+    {
+      "action": {
+        "type": "http_request",
+        "tag": "integration",
+        "connection_id": null,
+        "connection_name": "",
+        "use_connection_name": false,
+        "integration_id": null,
+        "data": {
+          "name": "Raise Analyst Verdict",
+          "action_type": "http_request",
+          "public_action_id": "sentinelone-alert-trigger-actions",
+          "method": "post",
+          "url": "{{Connection.protocol}}{{Connection.url}}/web/api/v2.1/unifiedalerts/graphql",
+          "url_path": null,
+          "url_prefix": null,
+          "payload": "{\n  \"query\": \"mutation SetVerdict { alertTriggerActions(actions: [{ id: \\\"S1/alert/setAnalystVerdict\\\", payload: { analystVerdict: { value: \\\"suspicious\\\" } } }], filter: { or: [{ and: [{ fieldId: \\\"id\\\", stringEqual: { value: \\\"{{singularity-response-trigger.data.id}}\\\" } }] }] }) { ... on ActionsTriggered { actions { actionId } } } }\"\n}",
+          "parameters": [],
+          "retry_on_status_code": null,
+          "retry_on_status_codes": [500],
+          "ssl_verification": true,
+          "timeout": 30,
+          "headers": { "Content-Type": "application/json", "accept": "application/json" },
+          "use_authentication_data": true,
+          "use_proxy": false,
+          "redirect_follow": true,
+          "continue_on_fail": true,
+          "body_type": null
+        },
+        "state": "active",
+        "description": "Raise the alert's analyst verdict to 'suspicious' (pending TI confirmation, per evidence discipline). alertTriggerActions envelope; confirm the exact action id on the target tenant.",
+        "client_data": { "position": { "x": 0, "y": 1947 }, "dimensions": { "width": 256, "height": 76 }, "collapsed": false },
+        "snippet_workflow_id": null,
+        "snippet_version_id": null
+      },
+      "export_id": 6,
+      "connected_to": [{ "target": 5, "custom_handle": null }],
+      "parent_action": null
+    },
+    {
+      "action": {
+        "type": "http_request",
+        "tag": "integration",
+        "connection_id": null,
+        "connection_name": "",
+        "use_connection_name": false,
+        "integration_id": null,
+        "data": {
+          "name": "Notify SOC Slack",
+          "action_type": "http_request",
+          "public_action_id": "slack-post-message",
+          "method": "post",
+          "url": "https://slack.com/api/chat.postMessage",
+          "url_path": null,
+          "url_prefix": null,
+          "payload": "{\n  \"channel\": \"#novamind-soc\",\n  \"text\": \"[NovaMind] Data-exfil contained on api.novamind.ai. src_ip {{local_var.client_ip}} blocked on export routes + zone IP. VT malicious={{local_var.vt_malicious}}, AbuseIPDB={{local_var.abuse_score}}. S1 note+IOC added, verdict raised. Alert {{singularity-response-trigger.data.id}} ({{singularity-response-trigger.data.name}}). Check DLP for realized loss.\"\n}",
+          "parameters": [],
+          "retry_on_status_code": null,
+          "retry_on_status_codes": [500],
+          "ssl_verification": true,
+          "timeout": 30,
+          "headers": { "Content-Type": "application/json" },
+          "use_authentication_data": true,
+          "use_proxy": false,
+          "redirect_follow": true,
+          "continue_on_fail": true,
+          "body_type": null
+        },
+        "state": "active",
+        "description": "Post the exfil containment summary to the SOC/DLP Slack channel.",
+        "client_data": { "position": { "x": 0, "y": 2124 }, "dimensions": { "width": 256, "height": 76 }, "collapsed": false },
+        "snippet_workflow_id": null,
+        "snippet_version_id": null
+      },
+      "export_id": 5,
+      "connected_to": [{ "target": 4, "custom_handle": null }],
+      "parent_action": null
+    },
+    {
+      "action": {
+        "type": "condition",
+        "tag": "core_action",
+        "connection_id": null,
+        "connection_name": null,
+        "use_connection_name": false,
+        "integration_id": null,
+        "data": {
+          "name": "Escalate Confirmed Malicious",
+          "action_type": "condition",
+          "condition_type": "multi",
+          "condition": null,
+          "conditions": [
+            { "input_value": "{{local_var.vt_malicious}}", "compared_value": "0", "comparison_operator": "greater_than" },
+            { "input_value": "{{local_var.abuse_score}}", "compared_value": "50", "comparison_operator": "greater_than_or_equals" }
+          ],
+          "conditions_relationship": "or"
+        },
+        "state": "active",
+        "description": "Second gate: escalate the destructive account-wide actions only on an independent threat-intel verdict (VT malicious > 0 OR AbuseIPDB confidence >= 50). Evidence discipline — no global block on the detection alone.",
+        "client_data": { "position": { "x": 0, "y": 2301 }, "dimensions": { "width": 256, "height": 76 }, "collapsed": false },
+        "snippet_workflow_id": null,
+        "snippet_version_id": null
+      },
+      "export_id": 4,
+      "connected_to": [
+        { "target": 3, "custom_handle": "true" },
+        { "target": 1, "custom_handle": "false" }
+      ],
+      "parent_action": null
+    },
+    {
+      "action": {
+        "type": "http_request",
+        "tag": "integration",
+        "connection_id": null,
+        "connection_name": "",
+        "use_connection_name": false,
+        "integration_id": null,
+        "data": {
+          "name": "Account Global Edge Block",
+          "action_type": "http_request",
+          "public_action_id": "cloudflare-create-account-ip-access-rule",
+          "method": "post",
+          "url": "{{Connection.protocol}}{{Connection.url}}/client/v4/accounts/{{Connection.account_id}}/firewall/access_rules/rules",
+          "url_path": null,
+          "url_prefix": null,
+          "payload": "{\n  \"mode\": \"block\",\n  \"configuration\": { \"target\": \"ip\", \"value\": \"{{local_var.client_ip}}\" },\n  \"notes\": \"NovaMind exfil TI-confirmed - account-wide edge block - alert {{singularity-response-trigger.data.id}} (VT={{local_var.vt_malicious}} AbuseIPDB={{local_var.abuse_score}})\"\n}",
+          "parameters": [],
+          "retry_on_status_code": null,
+          "retry_on_status_codes": [500],
+          "ssl_verification": true,
+          "timeout": 30,
+          "headers": { "Content-Type": "application/json", "accept": "application/json" },
+          "use_authentication_data": true,
+          "use_proxy": false,
+          "redirect_follow": true,
+          "continue_on_fail": false,
+          "body_type": null
+        },
+        "state": "active",
+        "description": "Account-level Cloudflare IP access rule — blocks the confirmed-malicious source across every NovaMind zone (shop/portal/api), not just the api zone.",
+        "client_data": { "position": { "x": -160, "y": 2478 }, "dimensions": { "width": 256, "height": 76 }, "collapsed": false },
+        "snippet_workflow_id": null,
+        "snippet_version_id": null
+      },
+      "export_id": 3,
+      "connected_to": [{ "target": 2, "custom_handle": null }],
+      "parent_action": null
+    },
+    {
+      "action": {
+        "type": "http_request",
+        "tag": "core_action",
+        "connection_id": null,
+        "connection_name": null,
+        "use_connection_name": false,
+        "integration_id": null,
+        "data": {
+          "name": "Flag Compromised API Credential",
+          "action_type": "http_request",
+          "public_action_id": null,
+          "method": "post",
+          "url": "https://novamind-api.novamind-lab.workers.dev/api/incident",
+          "url_path": null,
+          "url_prefix": null,
+          "payload": "{\n  \"action\": \"flag_compromised_credential\",\n  \"severity\": \"critical\",\n  \"affected_services\": [\"Data Export API\"],\n  \"reason\": \"TI-confirmed data exfiltration from {{local_var.client_ip}} (VT malicious={{local_var.vt_malicious}}, AbuseIPDB={{local_var.abuse_score}}). Revoke/rotate the API token used by this source; identify it via the Search Related API Activity LRQ (actor.user.name).\",\n  \"banner\": \"NovaMind is investigating anomalous data-export activity. Export endpoints are temporarily restricted.\",\n  \"source_alert\": \"{{singularity-response-trigger.data.id}}\"\n}",
+          "parameters": [],
+          "retry_on_status_code": null,
+          "retry_on_status_codes": [500, 502, 503],
+          "ssl_verification": true,
+          "timeout": 30,
+          "headers": { "Content-Type": "application/json", "X-Incident-Key": "<set-INCIDENT_KEY-after-import>" },
+          "use_authentication_data": false,
+          "use_proxy": false,
+          "redirect_follow": true,
+          "continue_on_fail": true,
+          "body_type": null
+        },
+        "state": "active",
+        "description": "Flag/revoke the compromised API credential and raise the /status banner on the NovaMind Worker (key-gated by INCIDENT_KEY, set the header after import). Native S1 lacks a Cloudflare-token revoke action, so credential handling is delegated to the app's incident endpoint.",
+        "client_data": { "position": { "x": -160, "y": 2655 }, "dimensions": { "width": 256, "height": 76 }, "collapsed": false },
+        "snippet_workflow_id": null,
+        "snippet_version_id": null
+      },
+      "export_id": 2,
+      "connected_to": [{ "target": 0, "custom_handle": null }],
+      "parent_action": null
+    },
+    {
+      "action": {
+        "type": "send_email",
+        "tag": "core_action",
+        "connection_id": null,
+        "connection_name": null,
+        "use_connection_name": false,
+        "integration_id": null,
+        "data": {
+          "name": "Send Email CRITICAL Escalation",
+          "action_type": "send_email",
+          "subject": "[NovaMind][CRITICAL] TI-confirmed data exfiltration - {{singularity-response-trigger.data.name}}",
+          "to": ["soc@novamind.ai", "dlp@novamind.ai"],
+          "cc": [],
+          "bcc": [],
+          "reply_to": [],
+          "mime_type": "text/html",
+          "body": "<!DOCTYPE html><html><body><h3>NovaMind - Data Exfiltration (TI-CONFIRMED)</h3><p>Alert {{singularity-response-trigger.data.id}} ({{singularity-response-trigger.data.name}})</p><ul><li>Source IP: {{local_var.client_ip}} - VT malicious={{local_var.vt_malicious}}, AbuseIPDB={{local_var.abuse_score}}</li><li>Cloudflare: export routes blocked + zone IP block + <b>account-wide edge block</b></li><li>Compromised API credential flagged/revoke requested on the NovaMind Worker</li><li>S1 note + IOC added, analyst verdict raised</li></ul><p><b>Next:</b> identify the authenticated caller (actor.user.name) via the Search Related API Activity LRQ and quantify realized data loss with DLP.</p></body></html>",
+          "attachments": [],
+          "continue_on_fail": true
+        },
+        "state": "active",
+        "description": "CRITICAL escalation email to SOC + DLP (TI-confirmed branch).",
+        "client_data": { "position": { "x": -160, "y": 2832 }, "dimensions": { "width": 256, "height": 76 }, "collapsed": false },
+        "snippet_workflow_id": null,
+        "snippet_version_id": null
+      },
+      "export_id": 0,
+      "connected_to": [],
+      "parent_action": null
+    },
+    {
+      "action": {
+        "type": "send_email",
+        "tag": "core_action",
+        "connection_id": null,
+        "connection_name": null,
+        "use_connection_name": false,
+        "integration_id": null,
+        "data": {
+          "name": "Send Email Contained",
+          "action_type": "send_email",
+          "subject": "[NovaMind] Data-exfil contained (monitoring) - {{singularity-response-trigger.data.name}}",
+          "to": ["soc@novamind.ai"],
+          "cc": [],
+          "bcc": [],
+          "reply_to": [],
+          "mime_type": "text/html",
+          "body": "<!DOCTYPE html><html><body><h3>NovaMind - Data Exfiltration (contained, TI not yet confirmed)</h3><p>Alert {{singularity-response-trigger.data.id}} ({{singularity-response-trigger.data.name}})</p><ul><li>Source IP: {{local_var.client_ip}} - VT malicious={{local_var.vt_malicious}}, AbuseIPDB={{local_var.abuse_score}} (below escalation threshold)</li><li>Cloudflare: export routes blocked + zone IP block (no account-wide block - reputation not confirmed)</li><li>S1 note + IOC added, analyst verdict raised to suspicious</li></ul><p><b>Next:</b> analyst review - confirm/deny, then escalate or clear. Verify realized loss with DLP.</p></body></html>",
+          "attachments": [],
+          "continue_on_fail": true
+        },
+        "state": "active",
+        "description": "Standard containment email to SOC (reputation-not-confirmed branch).",
+        "client_data": { "position": { "x": 160, "y": 2478 }, "dimensions": { "width": 256, "height": 76 }, "collapsed": false },
+        "snippet_workflow_id": null,
+        "snippet_version_id": null
+      },
+      "export_id": 1,
+      "connected_to": [],
+      "parent_action": null
+    }
+  ]
+}

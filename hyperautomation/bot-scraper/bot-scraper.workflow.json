@@ -1,0 +1,536 @@
+{
+  "name": "OneFlare Bot/Scraper Response - Graduated Cloudflare Mitigation (BotScore)",
+  "description": "Fires on the S1 scheduled detection 'CF-Bot-Scraper (BotScore)' (rule 2523842940840264774), which flags a single src_ip producing >= 20 HTTP requests scored <= 29 by Cloudflare's ML BotScore against the soledrop.co lab surface. The workflow keys off Cloudflare's ML verdict (BotScore) - NOT the spoofable User-Agent. It extracts src_ip, re-derives the bot metrics in-flow from the detection's own source (class_uid 4002) via PowerQuery so it never depends on a spoofable field, enriches src_ip reputation via VirusTotal (ASN/AS-owner is the 'known bad hosting' signal), then decides: known-bad reputation OR high in-lab volume => hard BLOCK the IP at Cloudflare; otherwise => graduated managed_challenge (challenge-first is the correct bot response). Both paths add an evidence-backed S1 alert note, post to Slack, and email the SOC. run_automatically is false so an analyst approves the containment from the Singularity Response console. MITRE ATT&CK T1595 (Active Scanning), T1071 (Application Layer Protocol); MITRE ATLAS AML.T0002 (data reconnaissance via scraping).",
+  "actions": [
+    {
+      "action": {
+        "type": "singularity_response_trigger",
+        "tag": "core_action",
+        "connection_id": null,
+        "connection_name": null,
+        "use_connection_name": false,
+        "integration_id": null,
+        "data": {
+          "name": "Singularity Response Trigger",
+          "action_type": "singularity_response_trigger",
+          "filter_groups": [
+            {
+              "condition": {
+                "operator": "and",
+                "conditions": [
+                  { "input_value": "name", "compared_value": "CF-Bot-Scraper", "comparison_operator": "contains" },
+                  { "input_value": "severity", "compared_value": "[\"MEDIUM\",\"HIGH\",\"CRITICAL\"]", "comparison_operator": "in" }
+                ]
+              },
+              "is_disabled": false,
+              "run_automatically": false,
+              "event_type": "alert",
+              "event_subtypes": ["CREATE"]
+            }
+          ]
+        },
+        "state": "active",
+        "description": "Fires on the CF-Bot-Scraper (BotScore) detection. run_automatically=false: an analyst approves the graduated containment from the alert UI.",
+        "client_data": { "position": { "x": 0, "y": 0 }, "dimensions": { "width": 256, "height": 100 }, "collapsed": false },
+        "snippet_workflow_id": null,
+        "snippet_version_id": null
+      },
+      "export_id": 15,
+      "connected_to": [{ "target": 14, "custom_handle": null }],
+      "parent_action": null
+    },
+    {
+      "action": {
+        "type": "variable",
+        "tag": "core_action",
+        "connection_id": null,
+        "connection_name": null,
+        "use_connection_name": false,
+        "integration_id": null,
+        "data": {
+          "name": "Bot Source IP",
+          "action_type": "variable",
+          "variables": [
+            {
+              "name": "src_ip",
+              "value": "{{Function.DEFAULT(singularity-response-trigger.data.indicators[0].value, \"no-ip\")}}",
+              "should_use_as_output": false,
+              "is_secret": false
+            }
+          ],
+          "variables_scope": "local"
+        },
+        "state": "active",
+        "description": "Real Cloudflare ClientIP (src_endpoint.ip) carried on the alert indicator - the entity the detection grouped by. DEFAULT falls back to 'no-ip' so the flow never crashes on a missing indicator.",
+        "client_data": { "position": { "x": 0, "y": 177 }, "dimensions": { "width": 256, "height": 76 }, "collapsed": false },
+        "snippet_workflow_id": null,
+        "snippet_version_id": null
+      },
+      "export_id": 14,
+      "connected_to": [{ "target": 13, "custom_handle": null }],
+      "parent_action": null
+    },
+    {
+      "action": {
+        "type": "condition",
+        "tag": "core_action",
+        "connection_id": null,
+        "connection_name": null,
+        "use_connection_name": false,
+        "integration_id": null,
+        "data": {
+          "name": "Valid Source IP",
+          "action_type": "condition",
+          "condition_type": "multi",
+          "condition": null,
+          "conditions": [
+            { "input_value": "{{local_var.src_ip}}", "compared_value": "no-ip", "comparison_operator": "not_equals" }
+          ],
+          "conditions_relationship": "and"
+        },
+        "state": "active",
+        "description": "Evidence gate: only enrich + contain when a real ClientIP was extracted from the alert. False branch is intentionally a dead-end (no-op).",
+        "client_data": { "position": { "x": 0, "y": 354 }, "dimensions": { "width": 256, "height": 76 }, "collapsed": false },
+        "snippet_workflow_id": null,
+        "snippet_version_id": null
+      },
+      "export_id": 13,
+      "connected_to": [{ "target": 12, "custom_handle": "true" }],
+      "parent_action": null
+    },
+    {
+      "action": {
+        "type": "variable",
+        "tag": "core_action",
+        "connection_id": null,
+        "connection_name": null,
+        "use_connection_name": false,
+        "integration_id": null,
+        "data": {
+          "name": "Related Activity Query",
+          "action_type": "variable",
+          "variables": [
+            {
+              "name": "pq_query",
+              "value": "class_uid=4002 dataSource.name='Cloudflare' | let bscore = number(unmapped.BotScore) | filter src_endpoint.ip = '{{local_var.src_ip}}' AND http_request.url.hostname contains:anycase(\"soledrop.co\") | group related_events = count(), likely_bot_events = count(bscore <= 29), distinct_hosts = estimate_distinct(http_request.url.hostname), distinct_paths = estimate_distinct(http_request.url.path), min_botscore = min(bscore), sample_ua = any(http_request.user_agent), sample_path = any(http_request.url.path), country = any(src_endpoint.location.country) | limit 1",
+              "should_use_as_output": false,
+              "is_secret": false
+            }
+          ],
+          "variables_scope": "local"
+        },
+        "state": "active",
+        "description": "Re-derive the bot metrics from the detection's OWN source (class_uid 4002 Cloudflare HTTP) for this src_ip over the LRQ window, instead of trusting alert row-field paths (the rule's entityMappings is a pending feature). Gives reliable volume, breadth-of-crawl and lowest BotScore for the note.",
+        "client_data": { "position": { "x": 0, "y": 531 }, "dimensions": { "width": 256, "height": 76 }, "collapsed": false },
+        "snippet_workflow_id": null,
+        "snippet_version_id": null
+      },
+      "export_id": 12,
+      "connected_to": [{ "target": 11, "custom_handle": null }],
+      "parent_action": null
+    },
+    {
+      "action": {
+        "type": "http_request",
+        "tag": "integration",
+        "connection_id": null,
+        "connection_name": "",
+        "use_connection_name": false,
+        "integration_id": null,
+        "data": {
+          "name": "Search Related Activity",
+          "action_type": "http_request",
+          "public_action_id": "sentinelone-run-powerquery",
+          "method": "post",
+          "url": "{{Connection.protocol}}xdr.us1.sentinelone.net/api/<@powerQuery@>",
+          "url_path": null,
+          "url_prefix": null,
+          "payload": "{\n  \"query\": \"{{local_var.pq_query}}\",\n  \"startTime\": \"24h\",\n  \"endTime\": \"0h\"\n}",
+          "parameters": [],
+          "retry_on_status_code": null,
+          "retry_on_status_codes": [500],
+          "ssl_verification": true,
+          "timeout": 60,
+          "headers": { "Content-Type": "application/json", "accept": "application/json" },
+          "use_authentication_data": true,
+          "use_proxy": false,
+          "redirect_follow": true,
+          "continue_on_fail": true,
+          "body_type": null
+        },
+        "state": "active",
+        "description": "S1 enrichment (catalog B8, PowerQuery via DV): count this src_ip's bot/scraper footprint across the lab surface in 24h - is it a repeat offender? Needs the 'SentinelOne SDL' (Bearer) connection. continue_on_fail=true so a query miss degrades to challenge, never blocks the flow.",
+        "client_data": { "position": { "x": 0, "y": 708 }, "dimensions": { "width": 256, "height": 76 }, "collapsed": false },
+        "snippet_workflow_id": null,
+        "snippet_version_id": null
+      },
+      "export_id": 11,
+      "connected_to": [{ "target": 10, "custom_handle": null }],
+      "parent_action": null
+    },
+    {
+      "action": {
+        "type": "http_request",
+        "tag": "integration",
+        "connection_id": null,
+        "connection_name": "",
+        "use_connection_name": false,
+        "integration_id": null,
+        "data": {
+          "name": "Check IP Reputation",
+          "action_type": "http_request",
+          "public_action_id": "virustotal-get-ip-report",
+          "method": "get",
+          "url": "https://www.virustotal.com/api/v3/ip_addresses/{{local_var.src_ip}}",
+          "url_path": null,
+          "url_prefix": null,
+          "payload": null,
+          "parameters": [],
+          "retry_on_status_code": null,
+          "retry_on_status_codes": [500],
+          "ssl_verification": true,
+          "timeout": 30,
+          "headers": { "accept": "application/json" },
+          "use_authentication_data": true,
+          "use_proxy": false,
+          "redirect_follow": true,
+          "continue_on_fail": true,
+          "body_type": null
+        },
+        "state": "active",
+        "description": "VirusTotal IP reputation (catalog B10). last_analysis_stats.malicious is the verdict gate; as_owner/asn surfaces the 'known bad hosting ASN' signal scrapers typically ride. Needs the VirusTotal connection (x-apikey). continue_on_fail=true.",
+        "client_data": { "position": { "x": 0, "y": 885 }, "dimensions": { "width": 256, "height": 76 }, "collapsed": false },
+        "snippet_workflow_id": null,
+        "snippet_version_id": null
+      },
+      "export_id": 10,
+      "connected_to": [{ "target": 9, "custom_handle": null }],
+      "parent_action": null
+    },
+    {
+      "action": {
+        "type": "variable",
+        "tag": "core_action",
+        "connection_id": null,
+        "connection_name": null,
+        "use_connection_name": false,
+        "integration_id": null,
+        "data": {
+          "name": "VT Malicious Count",
+          "action_type": "variable",
+          "variables": [
+            {
+              "name": "vt_malicious",
+              "value": "{{Function.DEFAULT(check-ip-reputation.body.data.attributes.last_analysis_stats.malicious, \"0\")}}",
+              "should_use_as_output": false,
+              "is_secret": false
+            }
+          ],
+          "variables_scope": "local"
+        },
+        "state": "active",
+        "description": "Extract the VirusTotal malicious-engine count once; reused by the decision gate and the S1 note. DEFAULT to '0' when VT was unreachable or the IP is unknown.",
+        "client_data": { "position": { "x": 0, "y": 1062 }, "dimensions": { "width": 256, "height": 76 }, "collapsed": false },
+        "snippet_workflow_id": null,
+        "snippet_version_id": null
+      },
+      "export_id": 9,
+      "connected_to": [{ "target": 8, "custom_handle": null }],
+      "parent_action": null
+    },
+    {
+      "action": {
+        "type": "variable",
+        "tag": "core_action",
+        "connection_id": null,
+        "connection_name": null,
+        "use_connection_name": false,
+        "integration_id": null,
+        "data": {
+          "name": "Related Events Count",
+          "action_type": "variable",
+          "variables": [
+            {
+              "name": "related_events",
+              "value": "{{Function.DEFAULT(search-related-activity.body.matches[0].attributes.related_events, \"0\")}}",
+              "should_use_as_output": false,
+              "is_secret": false
+            }
+          ],
+          "variables_scope": "local"
+        },
+        "state": "active",
+        "description": "In-lab request volume this src_ip generated in 24h (from the class_uid 4002 re-derivation). Reused by the decision gate (high volume -> hard block) and the note.",
+        "client_data": { "position": { "x": 0, "y": 1239 }, "dimensions": { "width": 256, "height": 76 }, "collapsed": false },
+        "snippet_workflow_id": null,
+        "snippet_version_id": null
+      },
+      "export_id": 8,
+      "connected_to": [{ "target": 7, "custom_handle": null }],
+      "parent_action": null
+    },
+    {
+      "action": {
+        "type": "condition",
+        "tag": "core_action",
+        "connection_id": null,
+        "connection_name": null,
+        "use_connection_name": false,
+        "integration_id": null,
+        "data": {
+          "name": "Malicious or High Volume",
+          "action_type": "condition",
+          "condition_type": "multi",
+          "condition": null,
+          "conditions": [
+            { "input_value": "{{local_var.vt_malicious}}", "compared_value": "3", "comparison_operator": "greater_than_or_equals" },
+            { "input_value": "{{local_var.related_events}}", "compared_value": "200", "comparison_operator": "greater_than_or_equals" }
+          ],
+          "conditions_relationship": "or"
+        },
+        "state": "active",
+        "description": "Graduated-response decision keyed on the ML/reputation verdict + volume: VT malicious >= 3 OR >= 200 lab requests in 24h => hard BLOCK (true). Otherwise => managed_challenge (false). Challenge-first is the correct default for automated traffic that is not yet known-bad.",
+        "client_data": { "position": { "x": 0, "y": 1416 }, "dimensions": { "width": 256, "height": 76 }, "collapsed": false },
+        "snippet_workflow_id": null,
+        "snippet_version_id": null
+      },
+      "export_id": 7,
+      "connected_to": [
+        { "target": 6, "custom_handle": "true" },
+        { "target": 5, "custom_handle": "false" }
+      ],
+      "parent_action": null
+    },
+    {
+      "action": {
+        "type": "variable",
+        "tag": "core_action",
+        "connection_id": null,
+        "connection_name": null,
+        "use_connection_name": false,
+        "integration_id": null,
+        "data": {
+          "name": "Response Mode Block",
+          "action_type": "variable",
+          "variables": [
+            { "name": "cf_mode", "value": "block", "should_use_as_output": false, "is_secret": false }
+          ],
+          "variables_scope": "local"
+        },
+        "state": "active",
+        "description": "TRUE branch: known-bad reputation or high volume -> escalate the graduated response to a hard IP block.",
+        "client_data": { "position": { "x": -180, "y": 1593 }, "dimensions": { "width": 256, "height": 76 }, "collapsed": false },
+        "snippet_workflow_id": null,
+        "snippet_version_id": null
+      },
+      "export_id": 6,
+      "connected_to": [{ "target": 4, "custom_handle": null }],
+      "parent_action": null
+    },
+    {
+      "action": {
+        "type": "variable",
+        "tag": "core_action",
+        "connection_id": null,
+        "connection_name": null,
+        "use_connection_name": false,
+        "integration_id": null,
+        "data": {
+          "name": "Response Mode Challenge",
+          "action_type": "variable",
+          "variables": [
+            { "name": "cf_mode", "value": "managed_challenge", "should_use_as_output": false, "is_secret": false }
+          ],
+          "variables_scope": "local"
+        },
+        "state": "active",
+        "description": "FALSE branch: automated but not yet known-bad -> graduated managed_challenge (Cloudflare presents an interstitial; real browsers pass, headless scrapers do not). Reversible, low-risk containment.",
+        "client_data": { "position": { "x": 180, "y": 1593 }, "dimensions": { "width": 256, "height": 76 }, "collapsed": false },
+        "snippet_workflow_id": null,
+        "snippet_version_id": null
+      },
+      "export_id": 5,
+      "connected_to": [{ "target": 4, "custom_handle": null }],
+      "parent_action": null
+    },
+    {
+      "action": {
+        "type": "http_request",
+        "tag": "integration",
+        "connection_id": null,
+        "connection_name": "",
+        "use_connection_name": false,
+        "integration_id": null,
+        "data": {
+          "name": "Apply CF IP Access Rule",
+          "action_type": "http_request",
+          "public_action_id": "cloudflare-create-ip-access-rule",
+          "method": "post",
+          "url": "{{Connection.protocol}}{{Connection.url}}/client/v4/zones/{{Connection.zone_id}}/firewall/access_rules/rules",
+          "url_path": null,
+          "url_prefix": null,
+          "payload": "{\n  \"mode\": \"{{local_var.cf_mode}}\",\n  \"configuration\": { \"target\": \"ip\", \"value\": \"{{local_var.src_ip}}\" },\n  \"notes\": \"OneFlare bot-scraper auto-response ({{local_var.cf_mode}}) - S1 alert {{singularity-response-trigger.data.id}}, src {{local_var.src_ip}}\"\n}",
+          "parameters": [],
+          "retry_on_status_code": null,
+          "retry_on_status_codes": [500],
+          "ssl_verification": true,
+          "timeout": 30,
+          "headers": { "Content-Type": "application/json", "accept": "application/json" },
+          "use_authentication_data": true,
+          "use_proxy": false,
+          "redirect_follow": true,
+          "continue_on_fail": false,
+          "body_type": null
+        },
+        "state": "active",
+        "description": "Graduated containment at the Cloudflare zone (soledrop.co): mode is block OR managed_challenge, set by the decision branch. Convergence node - both branches wire here. Keys on Cloudflare's BotScore verdict + reputation, never on the User-Agent.",
+        "client_data": { "position": { "x": 0, "y": 1770 }, "dimensions": { "width": 256, "height": 76 }, "collapsed": false },
+        "snippet_workflow_id": null,
+        "snippet_version_id": null
+      },
+      "export_id": 4,
+      "connected_to": [{ "target": 3, "custom_handle": null }],
+      "parent_action": null
+    },
+    {
+      "action": {
+        "type": "variable",
+        "tag": "core_action",
+        "connection_id": null,
+        "connection_name": null,
+        "use_connection_name": false,
+        "integration_id": null,
+        "data": {
+          "name": "Note Body",
+          "action_type": "variable",
+          "variables": [
+            {
+              "name": "note_body",
+              "value": "OneFlare bot/scraper auto-response. Cloudflare ML BotScore flagged src_ip {{local_var.src_ip}} as automated (low BotScore) against the soledrop.co surface - keyed on Cloudflare's ML verdict, NOT the spoofable User-Agent. Response applied: Cloudflare IP Access rule mode={{local_var.cf_mode}} (challenge-first graduated containment). Reputation (VirusTotal): malicious_engines={{local_var.vt_malicious}}, AS_owner={{Function.DEFAULT(check-ip-reputation.body.data.attributes.as_owner, \"unknown\")}}, ASN={{Function.DEFAULT(check-ip-reputation.body.data.attributes.asn, \"unknown\")}}. In-lab activity (24h, class_uid 4002): requests={{local_var.related_events}}, distinct_hosts={{Function.DEFAULT(search-related-activity.body.matches[0].attributes.distinct_hosts, \"0\")}}, distinct_paths_crawled={{Function.DEFAULT(search-related-activity.body.matches[0].attributes.distinct_paths, \"0\")}}, min_botscore={{Function.DEFAULT(search-related-activity.body.matches[0].attributes.min_botscore, \"n/a\")}}, sample_ua={{Function.DEFAULT(search-related-activity.body.matches[0].attributes.sample_ua, \"n/a\")}}, sample_path={{Function.DEFAULT(search-related-activity.body.matches[0].attributes.sample_path, \"n/a\")}}, country={{Function.DEFAULT(search-related-activity.body.matches[0].attributes.country, \"n/a\")}}. Confidence: SUSPICIOUS - automated traffic per Cloudflare ML; TRUE-POSITIVE pending independent threat-intel confirmation.",
+              "should_use_as_output": false,
+              "is_secret": false
+            }
+          ],
+          "variables_scope": "local"
+        },
+        "state": "active",
+        "description": "Assemble the evidence-backed note: BotScore-based verdict, response mode, VT reputation (incl. AS owner/ASN), and the re-derived in-lab crawl metrics. Confidence deliberately capped at SUSPICIOUS (no CRITICAL/TP without independent TI).",
+        "client_data": { "position": { "x": 0, "y": 1947 }, "dimensions": { "width": 256, "height": 76 }, "collapsed": false },
+        "snippet_workflow_id": null,
+        "snippet_version_id": null
+      },
+      "export_id": 3,
+      "connected_to": [{ "target": 2, "custom_handle": null }],
+      "parent_action": null
+    },
+    {
+      "action": {
+        "type": "http_request",
+        "tag": "integration",
+        "connection_id": null,
+        "connection_name": "",
+        "use_connection_name": false,
+        "integration_id": null,
+        "data": {
+          "name": "Add S1 Alert Note",
+          "action_type": "http_request",
+          "public_action_id": "sentinelone-add-alert-note",
+          "method": "post",
+          "url": "{{Connection.protocol}}{{Connection.url}}/web/api/v2.1/unifiedalerts/graphql",
+          "url_path": null,
+          "url_prefix": null,
+          "payload": "{\n  \"query\": \"mutation AddAlertNote { addAlertNote(text: \\\"{{Function.HTML_ENCODE(local_var.note_body)}}\\\", alertId: \\\"{{singularity-response-trigger.data.id}}\\\") { data { alertId } } }\"\n}",
+          "parameters": [],
+          "retry_on_status_code": null,
+          "retry_on_status_codes": [500],
+          "ssl_verification": true,
+          "timeout": 30,
+          "headers": { "Content-Type": "application/json" },
+          "use_authentication_data": true,
+          "use_proxy": false,
+          "redirect_follow": true,
+          "continue_on_fail": true,
+          "body_type": null
+        },
+        "state": "active",
+        "description": "Annotate the unified alert with the finding + action taken (catalog B6 modern flavor). HTML_ENCODE keeps quotes/brackets in the note from breaking the GraphQL string. Needs the 'SentinelOne' (ApiToken) connection.",
+        "client_data": { "position": { "x": 0, "y": 2124 }, "dimensions": { "width": 256, "height": 76 }, "collapsed": false },
+        "snippet_workflow_id": null,
+        "snippet_version_id": null
+      },
+      "export_id": 2,
+      "connected_to": [{ "target": 1, "custom_handle": null }],
+      "parent_action": null
+    },
+    {
+      "action": {
+        "type": "http_request",
+        "tag": "integration",
+        "connection_id": null,
+        "connection_name": "",
+        "use_connection_name": false,
+        "integration_id": null,
+        "data": {
+          "name": "Notify SOC Slack",
+          "action_type": "http_request",
+          "public_action_id": "slack-post-message",
+          "method": "post",
+          "url": "https://slack.com/api/chat.postMessage",
+          "url_path": null,
+          "url_prefix": null,
+          "payload": "{\n  \"channel\": \"#oneflare-soc\",\n  \"text\": \"Bot/scraper contained: Cloudflare {{local_var.cf_mode}} applied to src_ip {{local_var.src_ip}} on soledrop.co. VT malicious_engines={{local_var.vt_malicious}}, 24h lab requests={{local_var.related_events}}. S1 alert {{singularity-response-trigger.data.id}} ({{singularity-response-trigger.data.name}}). Verdict keyed on Cloudflare BotScore, not User-Agent.\"\n}",
+          "parameters": [],
+          "retry_on_status_code": null,
+          "retry_on_status_codes": [500],
+          "ssl_verification": true,
+          "timeout": 30,
+          "headers": { "Content-Type": "application/json" },
+          "use_authentication_data": true,
+          "use_proxy": false,
+          "redirect_follow": true,
+          "continue_on_fail": true,
+          "body_type": null
+        },
+        "state": "active",
+        "description": "Post the containment summary to the SOC Slack channel. Needs the Slack integration connection. continue_on_fail=true so a Slack hiccup doesn't fail the run.",
+        "client_data": { "position": { "x": 0, "y": 2301 }, "dimensions": { "width": 256, "height": 76 }, "collapsed": false },
+        "snippet_workflow_id": null,
+        "snippet_version_id": null
+      },
+      "export_id": 1,
+      "connected_to": [{ "target": 0, "custom_handle": null }],
+      "parent_action": null
+    },
+    {
+      "action": {
+        "type": "send_email",
+        "tag": "core_action",
+        "connection_id": null,
+        "connection_name": null,
+        "use_connection_name": false,
+        "integration_id": null,
+        "data": {
+          "name": "Email SOC",
+          "action_type": "send_email",
+          "subject": "[OneFlare] Bot/scraper contained ({{local_var.cf_mode}}) - {{singularity-response-trigger.data.name}}",
+          "to": ["soc@novamind.ai"],
+          "cc": [],
+          "bcc": [],
+          "reply_to": [],
+          "mime_type": "text/html",
+          "body": "<!DOCTYPE html><html><body><h3>OneFlare Bot/Scraper Response</h3><p>Detection: {{singularity-response-trigger.data.name}} (alert {{singularity-response-trigger.data.id}})</p><ul><li>src_ip: {{local_var.src_ip}}</li><li>Cloudflare action: <b>{{local_var.cf_mode}}</b> (IP Access rule, zone soledrop.co)</li><li>VirusTotal malicious engines: {{local_var.vt_malicious}}</li><li>In-lab requests (24h): {{local_var.related_events}}</li></ul><p>Verdict keyed on Cloudflare's ML BotScore, not the spoofable User-Agent. Confidence: SUSPICIOUS - pending independent threat-intel confirmation.</p></body></html>",
+          "attachments": [],
+          "continue_on_fail": true
+        },
+        "state": "active",
+        "description": "Email the SOC distribution list a containment receipt (core SMTP mailer; configure the tenant email sender).",
+        "client_data": { "position": { "x": 0, "y": 2478 }, "dimensions": { "width": 256, "height": 76 }, "collapsed": false },
+        "snippet_workflow_id": null,
+        "snippet_version_id": null
+      },
+      "export_id": 0,
+      "connected_to": [],
+      "parent_action": null
+    }
+  ]
+}

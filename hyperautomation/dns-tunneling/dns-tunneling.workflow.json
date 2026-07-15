@@ -1,0 +1,904 @@
+{
+  "name": "OneFlare DNS-Tunnel / C2 Beaconing Response (CF-Gateway-DNSTunnel)",
+  "description": "Fires on the SentinelOne scheduled detection CF-Gateway-DNSTunnel (Cloudflare Gateway DNS, OCSF class_uid 4003, rule 2519102258169184569). Extracts the C2 base-domain (zone), source IP/device and beacon context from the alert, then runs two enrichments: (a) an S1 SDL PowerQuery for the same src_ip's other DNS beaconing in a 6h window (sustained tunnel vs one-off blip) and (b) a VirusTotal DOMAIN reputation lookup on the base-domain (domain, not just IP, is the load-bearing indicator for DNS C2). A decision branch gates containment on domain reputation OR beacon persistence. Containment: a Cloudflare Gateway DNS policy that blocks the base-domain (native DNS-tunnel containment), a zone IP Access rule on the source IP, S1 DNS+IPV4 IOCs, an S1 alert note (base domain, query volume, entropy, beacon persistence, reputation), an alert-verdict raise to SUSPICIOUS, and Slack+email notification. Endpoint isolation is an optional escalation gated on the alert binding to a real EDR asset (device_uid). run_automatically is false so an analyst approves from the Singularity Response console. MITRE T1071.004 / T1048 / T1568.002.",
+  "actions": [
+    {
+      "action": {
+        "type": "singularity_response_trigger",
+        "tag": "core_action",
+        "connection_id": null,
+        "connection_name": null,
+        "use_connection_name": false,
+        "integration_id": null,
+        "data": {
+          "name": "Singularity Response Trigger",
+          "action_type": "singularity_response_trigger",
+          "filter_groups": [
+            {
+              "condition": {
+                "operator": "and",
+                "conditions": [
+                  { "input_value": "severity", "compared_value": "[\"HIGH\",\"CRITICAL\"]", "comparison_operator": "in" },
+                  { "input_value": "name", "compared_value": "CF-Gateway-DNSTunnel", "comparison_operator": "contains" }
+                ]
+              },
+              "is_disabled": false,
+              "run_automatically": false,
+              "event_type": "alert",
+              "event_subtypes": ["CREATE"]
+            }
+          ]
+        },
+        "state": "active",
+        "description": "Fire on the CF-Gateway-DNSTunnel scheduled detection (Gateway DNS class_uid 4003). Analyst-approved (run_automatically:false).",
+        "client_data": { "position": { "x": 0, "y": 0 }, "dimensions": { "width": 256, "height": 100 }, "collapsed": false },
+        "snippet_workflow_id": null,
+        "snippet_version_id": null
+      },
+      "export_id": 100,
+      "connected_to": [{ "target": 99, "custom_handle": null }],
+      "parent_action": null
+    },
+    {
+      "action": {
+        "type": "variable",
+        "tag": "core_action",
+        "connection_id": null,
+        "connection_name": null,
+        "use_connection_name": false,
+        "integration_id": null,
+        "data": {
+          "name": "Source IP",
+          "action_type": "variable",
+          "variables": [
+            {
+              "name": "src_ip",
+              "value": "{{Function.DEFAULT(Function.DEFAULT(singularity-response-trigger.data.src_ip, singularity-response-trigger.data.indicators[0].value), \"no-ip\")}}",
+              "should_use_as_output": false,
+              "is_secret": false
+            }
+          ],
+          "variables_scope": "local"
+        },
+        "state": "active",
+        "description": "Offending device/source IP (rule column src_ip = src_endpoint.ip). DEFAULT chain to an alert indicator, then 'no-ip' sentinel.",
+        "client_data": { "position": { "x": 0, "y": 177 }, "dimensions": { "width": 256, "height": 76 }, "collapsed": false },
+        "snippet_workflow_id": null,
+        "snippet_version_id": null
+      },
+      "export_id": 99,
+      "connected_to": [{ "target": 98, "custom_handle": null }],
+      "parent_action": null
+    },
+    {
+      "action": {
+        "type": "variable",
+        "tag": "core_action",
+        "connection_id": null,
+        "connection_name": null,
+        "use_connection_name": false,
+        "integration_id": null,
+        "data": {
+          "name": "C2 Base Domain",
+          "action_type": "variable",
+          "variables": [
+            {
+              "name": "base_domain",
+              "value": "{{Function.DEFAULT(singularity-response-trigger.data.zone, \"no-domain\")}}",
+              "should_use_as_output": false,
+              "is_secret": false
+            }
+          ],
+          "variables_scope": "local"
+        },
+        "state": "active",
+        "description": "The registered C2 base-domain (rule column 'zone' = rightmost-3 labels). This is the block target for the Gateway DNS policy — DGA/fast-flux rotates subdomains, the zone is the durable indicator.",
+        "client_data": { "position": { "x": 0, "y": 354 }, "dimensions": { "width": 256, "height": 76 }, "collapsed": false },
+        "snippet_workflow_id": null,
+        "snippet_version_id": null
+      },
+      "export_id": 98,
+      "connected_to": [{ "target": 97, "custom_handle": null }],
+      "parent_action": null
+    },
+    {
+      "action": {
+        "type": "variable",
+        "tag": "core_action",
+        "connection_id": null,
+        "connection_name": null,
+        "use_connection_name": false,
+        "integration_id": null,
+        "data": {
+          "name": "Query Evidence",
+          "action_type": "variable",
+          "variables": [
+            {
+              "name": "evidence",
+              "value": "{{Function.DEFAULT(singularity-response-trigger.data.evidence, \"\")}}",
+              "should_use_as_output": false,
+              "is_secret": false
+            }
+          ],
+          "variables_scope": "local"
+        },
+        "state": "active",
+        "description": "Longest observed query name (rule column 'evidence' = max_by(QueryName, label_len)) — the strongest single tunnel/exfil sample for the note.",
+        "client_data": { "position": { "x": 0, "y": 531 }, "dimensions": { "width": 256, "height": 76 }, "collapsed": false },
+        "snippet_workflow_id": null,
+        "snippet_version_id": null
+      },
+      "export_id": 97,
+      "connected_to": [{ "target": 96, "custom_handle": null }],
+      "parent_action": null
+    },
+    {
+      "action": {
+        "type": "variable",
+        "tag": "core_action",
+        "connection_id": null,
+        "connection_name": null,
+        "use_connection_name": false,
+        "integration_id": null,
+        "data": {
+          "name": "Beacon Context",
+          "action_type": "variable",
+          "variables": [
+            { "name": "reason", "value": "{{Function.DEFAULT(singularity-response-trigger.data.reason, \"DNS tunneling / C2 beaconing\")}}", "should_use_as_output": false, "is_secret": false },
+            { "name": "total_queries", "value": "{{Function.DEFAULT(singularity-response-trigger.data.total_queries, \"0\")}}", "should_use_as_output": false, "is_secret": false },
+            { "name": "uniq_labels", "value": "{{Function.DEFAULT(singularity-response-trigger.data.uniq_labels, \"0\")}}", "should_use_as_output": false, "is_secret": false },
+            { "name": "hi_entropy", "value": "{{Function.DEFAULT(singularity-response-trigger.data.hi_entropy, \"0\")}}", "should_use_as_output": false, "is_secret": false },
+            { "name": "txt_long", "value": "{{Function.DEFAULT(singularity-response-trigger.data.txt_long, \"0\")}}", "should_use_as_output": false, "is_secret": false },
+            { "name": "device_uid", "value": "{{Function.DEFAULT(singularity-response-trigger.data.device_uid, \"no-uid\")}}", "should_use_as_output": false, "is_secret": false }
+          ],
+          "variables_scope": "local"
+        },
+        "state": "active",
+        "description": "Beacon/entropy metrics from the rule's projected columns. All values are INDEPENDENT trigger references (none reference another local_var), so a single multi-variable action is safe here.",
+        "client_data": { "position": { "x": 0, "y": 708 }, "dimensions": { "width": 256, "height": 76 }, "collapsed": false },
+        "snippet_workflow_id": null,
+        "snippet_version_id": null
+      },
+      "export_id": 96,
+      "connected_to": [{ "target": 95, "custom_handle": null }],
+      "parent_action": null
+    },
+    {
+      "action": {
+        "type": "condition",
+        "tag": "core_action",
+        "connection_id": null,
+        "connection_name": null,
+        "use_connection_name": false,
+        "integration_id": null,
+        "data": {
+          "name": "Targets Present",
+          "action_type": "condition",
+          "condition_type": "multi",
+          "condition": null,
+          "conditions": [
+            { "input_value": "{{local_var.base_domain}}", "compared_value": "no-domain", "comparison_operator": "not_equals" },
+            { "input_value": "{{local_var.src_ip}}", "compared_value": "no-ip", "comparison_operator": "not_equals" }
+          ],
+          "conditions_relationship": "and"
+        },
+        "state": "active",
+        "description": "Only proceed when a real base-domain AND source IP were extracted. If not, the workflow ends (false branch omitted) — no fabricated block targets.",
+        "client_data": { "position": { "x": 0, "y": 885 }, "dimensions": { "width": 256, "height": 76 }, "collapsed": false },
+        "snippet_workflow_id": null,
+        "snippet_version_id": null
+      },
+      "export_id": 95,
+      "connected_to": [{ "target": 94, "custom_handle": "true" }],
+      "parent_action": null
+    },
+    {
+      "action": {
+        "type": "variable",
+        "tag": "core_action",
+        "connection_id": null,
+        "connection_name": null,
+        "use_connection_name": false,
+        "integration_id": null,
+        "data": {
+          "name": "Related DNS PowerQuery",
+          "action_type": "variable",
+          "variables": [
+            {
+              "name": "related_pq",
+              "value": "class_uid=4003 dataSource.cloudflare_dataset='Gateway DNS' src_endpoint.ip='{{local_var.src_ip}}' unmapped.QueryName=* | let fqdn = lower(unmapped.QueryName) | let zone = replace(fqdn, '^.*\\\\.([^.]+\\\\.[^.]+\\\\.[^.]+)$', '$1') | group beacons=count(), distinct_zones=estimate_distinct(zone) by src_endpoint.ip | limit 5",
+              "should_use_as_output": false,
+              "is_secret": false
+            }
+          ],
+          "variables_scope": "local"
+        },
+        "state": "active",
+        "description": "PowerQuery body for the related-beaconing search over the source IP. Built in its own dedicated Variable action because the value references local_var.src_ip (set in an earlier action). Backslashes are double-escaped for the JSON string.",
+        "client_data": { "position": { "x": 0, "y": 1062 }, "dimensions": { "width": 256, "height": 76 }, "collapsed": false },
+        "snippet_workflow_id": null,
+        "snippet_version_id": null
+      },
+      "export_id": 94,
+      "connected_to": [{ "target": 93, "custom_handle": null }],
+      "parent_action": null
+    },
+    {
+      "action": {
+        "type": "http_request",
+        "tag": "integration",
+        "connection_id": null,
+        "connection_name": "",
+        "use_connection_name": false,
+        "integration_id": null,
+        "data": {
+          "name": "Search Related DNS Beaconing",
+          "action_type": "http_request",
+          "public_action_id": "sentinelone-sdl-powerquery",
+          "method": "post",
+          "url": "{{Connection.protocol}}{{Connection.url}}/api/powerQuery",
+          "url_path": null,
+          "url_prefix": null,
+          "payload": "{\n  \"query\": \"{{local_var.related_pq}}\",\n  \"startTime\": \"6h\",\n  \"endTime\": \"0h\"\n}",
+          "parameters": [],
+          "retry_on_status_code": null,
+          "retry_on_status_codes": [500],
+          "ssl_verification": true,
+          "timeout": 60,
+          "headers": { "Content-Type": "application/json", "accept": "application/json" },
+          "use_authentication_data": true,
+          "use_proxy": false,
+          "redirect_follow": true,
+          "continue_on_fail": true,
+          "body_type": null
+        },
+        "state": "active",
+        "description": "ENRICHMENT (a): SDL PowerQuery for the same src_ip's DNS beaconing over 6h — distinguishes a sustained tunnel from a one-off blip. REQUIRES the 'SentinelOne SDL' (Bearer) connection, NOT the ApiToken S1 connection. continue_on_fail so a failed enrichment falls through to the reputation gate.",
+        "client_data": { "position": { "x": 0, "y": 1239 }, "dimensions": { "width": 256, "height": 76 }, "collapsed": false },
+        "snippet_workflow_id": null,
+        "snippet_version_id": null
+      },
+      "export_id": 93,
+      "connected_to": [{ "target": 92, "custom_handle": null }],
+      "parent_action": null
+    },
+    {
+      "action": {
+        "type": "variable",
+        "tag": "core_action",
+        "connection_id": null,
+        "connection_name": null,
+        "use_connection_name": false,
+        "integration_id": null,
+        "data": {
+          "name": "Related Beacon Count",
+          "action_type": "variable",
+          "variables": [
+            {
+              "name": "related_beacon_count",
+              "value": "{{Function.DEFAULT(search-related-dns-beaconing.body.matches[0].beacons, \"0\")}}",
+              "should_use_as_output": false,
+              "is_secret": false
+            }
+          ],
+          "variables_scope": "local"
+        },
+        "state": "active",
+        "description": "Extract the beacon count from the related-DNS search. Defaults to '0' on empty/failed enrichment. Response path may need confirming on the live tenant (see README).",
+        "client_data": { "position": { "x": 0, "y": 1416 }, "dimensions": { "width": 256, "height": 76 }, "collapsed": false },
+        "snippet_workflow_id": null,
+        "snippet_version_id": null
+      },
+      "export_id": 92,
+      "connected_to": [{ "target": 91, "custom_handle": null }],
+      "parent_action": null
+    },
+    {
+      "action": {
+        "type": "http_request",
+        "tag": "core_action",
+        "connection_id": null,
+        "connection_name": null,
+        "use_connection_name": false,
+        "integration_id": null,
+        "data": {
+          "name": "Domain Reputation VirusTotal",
+          "action_type": "http_request",
+          "public_action_id": null,
+          "method": "get",
+          "url": "https://www.virustotal.com/api/v3/domains/{{local_var.base_domain}}",
+          "url_path": null,
+          "url_prefix": null,
+          "payload": null,
+          "parameters": [],
+          "retry_on_status_code": null,
+          "retry_on_status_codes": [500],
+          "ssl_verification": true,
+          "timeout": 30,
+          "headers": { "x-apikey": "<SET_VIRUSTOTAL_API_KEY>", "Content-Type": "application/json" },
+          "use_authentication_data": false,
+          "use_proxy": false,
+          "redirect_follow": true,
+          "continue_on_fail": true,
+          "body_type": null
+        },
+        "state": "active",
+        "description": "ENRICHMENT (b): VirusTotal DOMAIN report on the base-domain. Domain reputation (not just IP) is the load-bearing verdict for DNS C2. Set the x-apikey header to a VirusTotal API key post-import. continue_on_fail so a VT outage degrades to the beacon-persistence gate.",
+        "client_data": { "position": { "x": 0, "y": 1593 }, "dimensions": { "width": 256, "height": 76 }, "collapsed": false },
+        "snippet_workflow_id": null,
+        "snippet_version_id": null
+      },
+      "export_id": 91,
+      "connected_to": [{ "target": 90, "custom_handle": null }],
+      "parent_action": null
+    },
+    {
+      "action": {
+        "type": "condition",
+        "tag": "core_action",
+        "connection_id": null,
+        "connection_name": null,
+        "use_connection_name": false,
+        "integration_id": null,
+        "data": {
+          "name": "Domain Malicious",
+          "action_type": "condition",
+          "condition_type": "multi",
+          "condition": null,
+          "conditions": [
+            { "input_value": "{{domain-reputation-virustotal.body.data.attributes.last_analysis_stats.malicious}}", "compared_value": "0", "comparison_operator": "greater_than" }
+          ],
+          "conditions_relationship": "and"
+        },
+        "state": "active",
+        "description": "PRIMARY containment gate: VirusTotal flags the base-domain as malicious (>0 engines). TRUE goes straight to containment; FALSE falls to the beacon-persistence gate.",
+        "client_data": { "position": { "x": 0, "y": 1770 }, "dimensions": { "width": 256, "height": 76 }, "collapsed": false },
+        "snippet_workflow_id": null,
+        "snippet_version_id": null
+      },
+      "export_id": 90,
+      "connected_to": [
+        { "target": 80, "custom_handle": "true" },
+        { "target": 79, "custom_handle": "false" }
+      ],
+      "parent_action": null
+    },
+    {
+      "action": {
+        "type": "condition",
+        "tag": "core_action",
+        "connection_id": null,
+        "connection_name": null,
+        "use_connection_name": false,
+        "integration_id": null,
+        "data": {
+          "name": "Sustained Beaconing",
+          "action_type": "condition",
+          "condition_type": "multi",
+          "condition": null,
+          "conditions": [
+            { "input_value": "{{local_var.related_beacon_count}}", "compared_value": "20", "comparison_operator": "greater_than_or_equals" }
+          ],
+          "conditions_relationship": "and"
+        },
+        "state": "active",
+        "description": "SECONDARY containment gate: even with no VT verdict, a sustained tunnel (>=20 related DNS beacons from this src_ip in 6h) justifies containment. TRUE converges on the same block path; FALSE goes to the monitor path (note + notify, no destructive block).",
+        "client_data": { "position": { "x": 340, "y": 1947 }, "dimensions": { "width": 256, "height": 76 }, "collapsed": false },
+        "snippet_workflow_id": null,
+        "snippet_version_id": null
+      },
+      "export_id": 79,
+      "connected_to": [
+        { "target": 80, "custom_handle": "true" },
+        { "target": 57, "custom_handle": "false" }
+      ],
+      "parent_action": null
+    },
+    {
+      "action": {
+        "type": "http_request",
+        "tag": "integration",
+        "connection_id": null,
+        "connection_name": "",
+        "use_connection_name": false,
+        "integration_id": null,
+        "data": {
+          "name": "Block C2 Domain at Gateway",
+          "action_type": "http_request",
+          "public_action_id": "cloudflare-create-gateway-rule",
+          "method": "post",
+          "url": "{{Connection.protocol}}{{Connection.url}}/client/v4/accounts/{{Connection.account_id}}/gateway/rules",
+          "url_path": null,
+          "url_prefix": null,
+          "payload": "{\n  \"name\": \"OneFlare DNS-Tunnel block {{local_var.base_domain}}\",\n  \"description\": \"Auto-block DNS tunneling / C2 base-domain from S1 alert {{singularity-response-trigger.data.id}} (reason: {{local_var.reason}})\",\n  \"action\": \"block\",\n  \"enabled\": true,\n  \"filters\": [\"dns\"],\n  \"traffic\": \"any(dns.domains[*] == \\\"{{local_var.base_domain}}\\\")\"\n}",
+          "parameters": [],
+          "retry_on_status_code": null,
+          "retry_on_status_codes": [500],
+          "ssl_verification": true,
+          "timeout": 30,
+          "headers": { "Content-Type": "application/json", "accept": "application/json" },
+          "use_authentication_data": true,
+          "use_proxy": false,
+          "redirect_follow": true,
+          "continue_on_fail": false,
+          "body_type": null
+        },
+        "state": "active",
+        "description": "NATIVE DNS-TUNNEL CONTAINMENT: a Cloudflare Zero Trust Gateway DNS policy that blocks the base-domain for all downstream resolution. Modeled via the Cloudflare Gateway rules API (no native HA Gateway action exists — see README catalog gap). Requires the Cloudflare connection to expose account_id and a token with Zero Trust Gateway edit.",
+        "client_data": { "position": { "x": 0, "y": 1947 }, "dimensions": { "width": 256, "height": 76 }, "collapsed": false },
+        "snippet_workflow_id": null,
+        "snippet_version_id": null
+      },
+      "export_id": 80,
+      "connected_to": [{ "target": 78, "custom_handle": null }],
+      "parent_action": null
+    },
+    {
+      "action": {
+        "type": "http_request",
+        "tag": "integration",
+        "connection_id": null,
+        "connection_name": "",
+        "use_connection_name": false,
+        "integration_id": null,
+        "data": {
+          "name": "Block Source IP Zone Rule",
+          "action_type": "http_request",
+          "public_action_id": "cloudflare-create-ip-access-rule",
+          "method": "post",
+          "url": "{{Connection.protocol}}{{Connection.url}}/client/v4/zones/{{Connection.zone_id}}/firewall/access_rules/rules",
+          "url_path": null,
+          "url_prefix": null,
+          "payload": "{\n  \"mode\": \"block\",\n  \"configuration\": { \"target\": \"ip\", \"value\": \"{{local_var.src_ip}}\" },\n  \"notes\": \"OneFlare DNS-Tunnel auto-block (source of C2 beaconing to {{local_var.base_domain}}) - alert {{singularity-response-trigger.data.id}}\"\n}",
+          "parameters": [],
+          "retry_on_status_code": null,
+          "retry_on_status_codes": [500],
+          "ssl_verification": true,
+          "timeout": 30,
+          "headers": { "Content-Type": "application/json", "accept": "application/json" },
+          "use_authentication_data": true,
+          "use_proxy": false,
+          "redirect_follow": true,
+          "continue_on_fail": true,
+          "body_type": null
+        },
+        "state": "active",
+        "description": "Defence-in-depth: block the offending source IP at the Cloudflare zone edge (in case the host also uses HTTP egress). continue_on_fail so a zone-scope miss doesn't abort the IOC/note steps.",
+        "client_data": { "position": { "x": 0, "y": 2124 }, "dimensions": { "width": 256, "height": 76 }, "collapsed": false },
+        "snippet_workflow_id": null,
+        "snippet_version_id": null
+      },
+      "export_id": 78,
+      "connected_to": [{ "target": 77, "custom_handle": null }],
+      "parent_action": null
+    },
+    {
+      "action": {
+        "type": "http_request",
+        "tag": "integration",
+        "connection_id": null,
+        "connection_name": "",
+        "use_connection_name": false,
+        "integration_id": null,
+        "data": {
+          "name": "Add S1 IOCs",
+          "action_type": "http_request",
+          "public_action_id": "sentinelone-create-ioc",
+          "method": "post",
+          "url": "{{Connection.protocol}}{{Connection.url}}/web/api/v2.1/threat-intelligence/iocs",
+          "url_path": null,
+          "url_prefix": null,
+          "payload": "{\n  \"data\": [\n    {\n      \"type\": \"DNS\",\n      \"value\": \"{{local_var.base_domain}}\",\n      \"method\": \"EQUALS\",\n      \"source\": \"OneFlare DNS-Tunnel Hyperautomation\",\n      \"name\": \"DNS tunneling / C2 base-domain\",\n      \"description\": \"Auto-added from CF-Gateway-DNSTunnel alert {{singularity-response-trigger.data.id}}; reason {{local_var.reason}}; uniq_labels {{local_var.uniq_labels}}; hi_entropy {{local_var.hi_entropy}}; txt_long {{local_var.txt_long}}\",\n      \"category\": \"command_and_control\",\n      \"externalId\": \"OneFlare-DNSTunnel\",\n      \"originalRiskScore\": \"85\",\n      \"creationTime\": \"{{Function.DATETIME_NOW()}}\",\n      \"validUntil\": \"{{Function.DELTA_NOW(-168)}}\"\n    },\n    {\n      \"type\": \"IPV4\",\n      \"value\": \"{{local_var.src_ip}}\",\n      \"method\": \"EQUALS\",\n      \"source\": \"OneFlare DNS-Tunnel Hyperautomation\",\n      \"name\": \"DNS tunneling source host\",\n      \"description\": \"Source of DNS beaconing to {{local_var.base_domain}} - alert {{singularity-response-trigger.data.id}}\",\n      \"category\": \"command_and_control\",\n      \"externalId\": \"OneFlare-DNSTunnel\",\n      \"originalRiskScore\": \"70\",\n      \"creationTime\": \"{{Function.DATETIME_NOW()}}\",\n      \"validUntil\": \"{{Function.DELTA_NOW(-168)}}\"\n    }\n  ],\n  \"filter\": { \"accountIds\": [\"{{singularity-response-trigger.data.scopeId}}\"] }\n}",
+          "parameters": [],
+          "retry_on_status_code": null,
+          "retry_on_status_codes": [500],
+          "ssl_verification": true,
+          "timeout": 30,
+          "headers": { "Content-Type": "application/json", "accept": "application/json" },
+          "use_authentication_data": true,
+          "use_proxy": false,
+          "redirect_follow": true,
+          "continue_on_fail": true,
+          "body_type": null
+        },
+        "state": "active",
+        "description": "Create two S1 Threat-Intelligence IOCs (DNS base-domain + IPV4 source), validUntil = 7 days forward. DNS type is the durable indicator; IPV4 captures the host.",
+        "client_data": { "position": { "x": 0, "y": 2301 }, "dimensions": { "width": 256, "height": 76 }, "collapsed": false },
+        "snippet_workflow_id": null,
+        "snippet_version_id": null
+      },
+      "export_id": 77,
+      "connected_to": [{ "target": 76, "custom_handle": null }],
+      "parent_action": null
+    },
+    {
+      "action": {
+        "type": "condition",
+        "tag": "core_action",
+        "connection_id": null,
+        "connection_name": null,
+        "use_connection_name": false,
+        "integration_id": null,
+        "data": {
+          "name": "Device Bound to Asset",
+          "action_type": "condition",
+          "condition_type": "multi",
+          "condition": null,
+          "conditions": [
+            { "input_value": "{{local_var.device_uid}}", "compared_value": "no-uid", "comparison_operator": "not_equals" }
+          ],
+          "conditions_relationship": "and"
+        },
+        "state": "active",
+        "description": "Endpoint isolation escalation gate. Cloudflare DNS alerts bind to 'Unknown Device' unless the asset-enrichment solution has populated device.uid. Only isolate when a real EDR agent id is present; otherwise skip to the note (the CF Gateway block already contains the C2 channel).",
+        "client_data": { "position": { "x": 0, "y": 2478 }, "dimensions": { "width": 256, "height": 76 }, "collapsed": false },
+        "snippet_workflow_id": null,
+        "snippet_version_id": null
+      },
+      "export_id": 76,
+      "connected_to": [
+        { "target": 75, "custom_handle": "true" },
+        { "target": 70, "custom_handle": "false" }
+      ],
+      "parent_action": null
+    },
+    {
+      "action": {
+        "type": "http_request",
+        "tag": "integration",
+        "connection_id": null,
+        "connection_name": "",
+        "use_connection_name": false,
+        "integration_id": null,
+        "data": {
+          "name": "Isolate Endpoint",
+          "action_type": "http_request",
+          "public_action_id": "sentinelone-disconnect-agent",
+          "method": "post",
+          "url": "{{Connection.protocol}}{{Connection.url}}/web/api/v2.1/agents/actions/disconnect",
+          "url_path": null,
+          "url_prefix": null,
+          "payload": "{\n  \"data\": { \"shouldReconnect\": false },\n  \"filter\": { \"uuids\": [\"{{local_var.device_uid}}\"] }\n}",
+          "parameters": [],
+          "retry_on_status_code": null,
+          "retry_on_status_codes": [500],
+          "ssl_verification": true,
+          "timeout": 30,
+          "headers": { "Content-Type": "application/json", "accept": "application/json" },
+          "use_authentication_data": true,
+          "use_proxy": false,
+          "redirect_follow": true,
+          "continue_on_fail": true,
+          "body_type": null
+        },
+        "state": "active",
+        "description": "ESCALATION (asset-bound only): network-isolate the beaconing endpoint via S1 EDR. Runs only when device_uid resolved to a real agent (see the asset-binding gate above). continue_on_fail so a stale uuid doesn't abort the receipt steps.",
+        "client_data": { "position": { "x": -340, "y": 2655 }, "dimensions": { "width": 256, "height": 76 }, "collapsed": false },
+        "snippet_workflow_id": null,
+        "snippet_version_id": null
+      },
+      "export_id": 75,
+      "connected_to": [{ "target": 70, "custom_handle": null }],
+      "parent_action": null
+    },
+    {
+      "action": {
+        "type": "variable",
+        "tag": "core_action",
+        "connection_id": null,
+        "connection_name": null,
+        "use_connection_name": false,
+        "integration_id": null,
+        "data": {
+          "name": "Confirmed Note Body",
+          "action_type": "variable",
+          "variables": [
+            {
+              "name": "confirmed_note",
+              "value": "OneFlare DNS-Tunnel response CONTAINED. Base-domain {{local_var.base_domain}} blocked at Cloudflare Gateway (DNS policy); source IP {{local_var.src_ip}} blocked at the zone edge. Reason: {{local_var.reason}}. Beacon context: total_queries={{local_var.total_queries}}, uniq_labels={{local_var.uniq_labels}}, hi_entropy={{local_var.hi_entropy}}, txt_long={{local_var.txt_long}}; related 6h beacons from this host={{local_var.related_beacon_count}}. Longest sample: {{local_var.evidence}}. VirusTotal malicious engines: {{Function.DEFAULT(domain-reputation-virustotal.body.data.attributes.last_analysis_stats.malicious, \"n/a\")}}. S1 IOCs (DNS+IPV4) added. Verdict raised to SUSPICIOUS - analyst/MDR confirms TRUE POSITIVE.",
+              "should_use_as_output": false,
+              "is_secret": false
+            }
+          ],
+          "variables_scope": "local"
+        },
+        "state": "active",
+        "description": "Assemble the contained-branch note body from the alert columns + enrichment outputs. Built as a plain string with embedded {{...}} so the GraphQL action can HTML_ENCODE it whole.",
+        "client_data": { "position": { "x": 0, "y": 2655 }, "dimensions": { "width": 256, "height": 76 }, "collapsed": false },
+        "snippet_workflow_id": null,
+        "snippet_version_id": null
+      },
+      "export_id": 70,
+      "connected_to": [{ "target": 74, "custom_handle": null }],
+      "parent_action": null
+    },
+    {
+      "action": {
+        "type": "http_request",
+        "tag": "integration",
+        "connection_id": null,
+        "connection_name": "",
+        "use_connection_name": false,
+        "integration_id": null,
+        "data": {
+          "name": "Add Confirmed Alert Note",
+          "action_type": "http_request",
+          "public_action_id": "sentinelone-add-alert-note",
+          "method": "post",
+          "url": "{{Connection.protocol}}{{Connection.url}}/web/api/v2.1/unifiedalerts/graphql",
+          "url_path": null,
+          "url_prefix": null,
+          "payload": "{\n  \"query\": \"mutation AddAlertNote { addAlertNote(text: \\\"{{Function.HTML_ENCODE(local_var.confirmed_note)}}\\\", alertId: \\\"{{singularity-response-trigger.data.id}}\\\") { data { alertId } } }\"\n}",
+          "parameters": [],
+          "retry_on_status_code": null,
+          "retry_on_status_codes": [500],
+          "ssl_verification": true,
+          "timeout": 30,
+          "headers": { "Content-Type": "application/json" },
+          "use_authentication_data": true,
+          "use_proxy": false,
+          "redirect_follow": true,
+          "continue_on_fail": true,
+          "body_type": null
+        },
+        "state": "active",
+        "description": "Add the containment note to the unified alert (UAM GraphQL addAlertNote, modern flavor B6). HTML_ENCODE guards quotes/ampersands in the note body.",
+        "client_data": { "position": { "x": 0, "y": 2832 }, "dimensions": { "width": 256, "height": 76 }, "collapsed": false },
+        "snippet_workflow_id": null,
+        "snippet_version_id": null
+      },
+      "export_id": 74,
+      "connected_to": [{ "target": 73, "custom_handle": null }],
+      "parent_action": null
+    },
+    {
+      "action": {
+        "type": "http_request",
+        "tag": "integration",
+        "connection_id": null,
+        "connection_name": "",
+        "use_connection_name": false,
+        "integration_id": null,
+        "data": {
+          "name": "Raise Alert Verdict",
+          "action_type": "http_request",
+          "public_action_id": "sentinelone-set-alert-verdict",
+          "method": "post",
+          "url": "{{Connection.protocol}}{{Connection.url}}/web/api/v2.1/unifiedalerts/graphql",
+          "url_path": null,
+          "url_prefix": null,
+          "payload": "{\n  \"query\": \"mutation SetVerdict { setAlertsAnalystVerdict(analystVerdict: SUSPICIOUS, filter: { ids: [\\\"{{singularity-response-trigger.data.id}}\\\"] }) { data { alertId } } }\"\n}",
+          "parameters": [],
+          "retry_on_status_code": null,
+          "retry_on_status_codes": [500],
+          "ssl_verification": true,
+          "timeout": 30,
+          "headers": { "Content-Type": "application/json" },
+          "use_authentication_data": true,
+          "use_proxy": false,
+          "redirect_follow": true,
+          "continue_on_fail": true,
+          "body_type": null
+        },
+        "state": "active",
+        "description": "Raise the alert analyst verdict to SUSPICIOUS (evidence discipline: a workflow never auto-declares TRUE_POSITIVE - that requires human/MDR or independent multi-source confirmation). Modeled via unifiedalerts GraphQL; confirm the mutation/enum on the live tenant (see README catalog gap).",
+        "client_data": { "position": { "x": 0, "y": 3009 }, "dimensions": { "width": 256, "height": 76 }, "collapsed": false },
+        "snippet_workflow_id": null,
+        "snippet_version_id": null
+      },
+      "export_id": 73,
+      "connected_to": [{ "target": 72, "custom_handle": null }],
+      "parent_action": null
+    },
+    {
+      "action": {
+        "type": "http_request",
+        "tag": "integration",
+        "connection_id": null,
+        "connection_name": "",
+        "use_connection_name": false,
+        "integration_id": null,
+        "data": {
+          "name": "Notify SOC Contained",
+          "action_type": "http_request",
+          "public_action_id": "slack-post-message",
+          "method": "post",
+          "url": "https://slack.com/api/chat.postMessage",
+          "url_path": null,
+          "url_prefix": null,
+          "payload": "{\n  \"channel\": \"#oneflare-soc\",\n  \"text\": \"DNS-Tunnel CONTAINED :lock: base-domain {{local_var.base_domain}} blocked at Cloudflare Gateway + source IP {{local_var.src_ip}} blocked at zone edge. Reason {{local_var.reason}}; related 6h beacons {{local_var.related_beacon_count}}; VT malicious {{Function.DEFAULT(domain-reputation-virustotal.body.data.attributes.last_analysis_stats.malicious, \\\"n/a\\\")}}. S1 IOCs added, verdict SUSPICIOUS. Alert {{singularity-response-trigger.data.id}} ({{singularity-response-trigger.data.name}}).\"\n}",
+          "parameters": [],
+          "retry_on_status_code": null,
+          "retry_on_status_codes": [500],
+          "ssl_verification": true,
+          "timeout": 30,
+          "headers": { "Content-Type": "application/json" },
+          "use_authentication_data": true,
+          "use_proxy": false,
+          "redirect_follow": true,
+          "continue_on_fail": true,
+          "body_type": null
+        },
+        "state": "active",
+        "description": "Post the containment summary to the SOC Slack channel.",
+        "client_data": { "position": { "x": 0, "y": 3186 }, "dimensions": { "width": 256, "height": 76 }, "collapsed": false },
+        "snippet_workflow_id": null,
+        "snippet_version_id": null
+      },
+      "export_id": 72,
+      "connected_to": [{ "target": 71, "custom_handle": null }],
+      "parent_action": null
+    },
+    {
+      "action": {
+        "type": "send_email",
+        "tag": "core_action",
+        "connection_id": null,
+        "connection_name": null,
+        "use_connection_name": false,
+        "integration_id": null,
+        "data": {
+          "name": "Email SOC Contained",
+          "action_type": "send_email",
+          "subject": "[OneFlare] DNS-Tunnel CONTAINED - {{local_var.base_domain}} ({{singularity-response-trigger.data.name}})",
+          "to": ["soc@oneflare.local"],
+          "cc": [],
+          "bcc": [],
+          "reply_to": [],
+          "mime_type": "text/html",
+          "body": "<!DOCTYPE html><html><body><h3>OneFlare DNS-Tunnel / C2 Beaconing Response</h3><p>Detection: {{singularity-response-trigger.data.name}} (alert {{singularity-response-trigger.data.id}})</p><ul><li>Blocked C2 base-domain (Cloudflare Gateway DNS policy): {{local_var.base_domain}}</li><li>Blocked source IP (zone rule): {{local_var.src_ip}}</li><li>Reason: {{local_var.reason}}</li><li>Beacon context: total {{local_var.total_queries}}, unique labels {{local_var.uniq_labels}}, high-entropy {{local_var.hi_entropy}}, long TXT {{local_var.txt_long}}; related 6h beacons {{local_var.related_beacon_count}}</li><li>Longest sample: {{local_var.evidence}}</li><li>S1 IOCs added (DNS + IPV4); verdict raised to SUSPICIOUS</li></ul><p>Analyst/MDR to confirm TRUE POSITIVE before closing.</p></body></html>",
+          "attachments": [],
+          "continue_on_fail": true
+        },
+        "state": "active",
+        "description": "Email the SOC distribution list a containment receipt.",
+        "client_data": { "position": { "x": 0, "y": 3363 }, "dimensions": { "width": 256, "height": 76 }, "collapsed": false },
+        "snippet_workflow_id": null,
+        "snippet_version_id": null
+      },
+      "export_id": 71,
+      "connected_to": [],
+      "parent_action": null
+    },
+    {
+      "action": {
+        "type": "variable",
+        "tag": "core_action",
+        "connection_id": null,
+        "connection_name": null,
+        "use_connection_name": false,
+        "integration_id": null,
+        "data": {
+          "name": "Monitor Note Body",
+          "action_type": "variable",
+          "variables": [
+            {
+              "name": "monitor_note",
+              "value": "OneFlare DNS-Tunnel response: MONITOR ONLY (no containment). Base-domain {{local_var.base_domain}} from src {{local_var.src_ip}} did NOT meet the block gate - VirusTotal malicious={{Function.DEFAULT(domain-reputation-virustotal.body.data.attributes.last_analysis_stats.malicious, \"n/a\")}} and related 6h beacons={{local_var.related_beacon_count}} (< 20 sustained threshold). Reason: {{local_var.reason}}; uniq_labels={{local_var.uniq_labels}}, hi_entropy={{local_var.hi_entropy}}, txt_long={{local_var.txt_long}}. Longest sample: {{local_var.evidence}}. Verdict: SUSPICIOUS - Pending Confirmation. No Gateway block applied; analyst to review and manually contain if warranted.",
+              "should_use_as_output": false,
+              "is_secret": false
+            }
+          ],
+          "variables_scope": "local"
+        },
+        "state": "active",
+        "description": "Assemble the monitor-branch note body. Reached when neither the reputation nor the sustained-beacon gate fired - respects evidence discipline by NOT auto-blocking a domain with no confirming signal.",
+        "client_data": { "position": { "x": 340, "y": 2124 }, "dimensions": { "width": 256, "height": 76 }, "collapsed": false },
+        "snippet_workflow_id": null,
+        "snippet_version_id": null
+      },
+      "export_id": 57,
+      "connected_to": [{ "target": 56, "custom_handle": null }],
+      "parent_action": null
+    },
+    {
+      "action": {
+        "type": "http_request",
+        "tag": "integration",
+        "connection_id": null,
+        "connection_name": "",
+        "use_connection_name": false,
+        "integration_id": null,
+        "data": {
+          "name": "Add Monitor Alert Note",
+          "action_type": "http_request",
+          "public_action_id": "sentinelone-add-alert-note",
+          "method": "post",
+          "url": "{{Connection.protocol}}{{Connection.url}}/web/api/v2.1/unifiedalerts/graphql",
+          "url_path": null,
+          "url_prefix": null,
+          "payload": "{\n  \"query\": \"mutation AddAlertNote { addAlertNote(text: \\\"{{Function.HTML_ENCODE(local_var.monitor_note)}}\\\", alertId: \\\"{{singularity-response-trigger.data.id}}\\\") { data { alertId } } }\"\n}",
+          "parameters": [],
+          "retry_on_status_code": null,
+          "retry_on_status_codes": [500],
+          "ssl_verification": true,
+          "timeout": 30,
+          "headers": { "Content-Type": "application/json" },
+          "use_authentication_data": true,
+          "use_proxy": false,
+          "redirect_follow": true,
+          "continue_on_fail": true,
+          "body_type": null
+        },
+        "state": "active",
+        "description": "Add the monitor-only note (no block) to the unified alert. HTML_ENCODE guards the body.",
+        "client_data": { "position": { "x": 340, "y": 2301 }, "dimensions": { "width": 256, "height": 76 }, "collapsed": false },
+        "snippet_workflow_id": null,
+        "snippet_version_id": null
+      },
+      "export_id": 56,
+      "connected_to": [{ "target": 55, "custom_handle": null }],
+      "parent_action": null
+    },
+    {
+      "action": {
+        "type": "http_request",
+        "tag": "integration",
+        "connection_id": null,
+        "connection_name": "",
+        "use_connection_name": false,
+        "integration_id": null,
+        "data": {
+          "name": "Notify SOC Monitor",
+          "action_type": "http_request",
+          "public_action_id": "slack-post-message",
+          "method": "post",
+          "url": "https://slack.com/api/chat.postMessage",
+          "url_path": null,
+          "url_prefix": null,
+          "payload": "{\n  \"channel\": \"#oneflare-soc\",\n  \"text\": \"DNS-Tunnel MONITOR :eyes: base-domain {{local_var.base_domain}} from {{local_var.src_ip}} did not meet the block gate (VT malicious {{Function.DEFAULT(domain-reputation-virustotal.body.data.attributes.last_analysis_stats.malicious, \\\"n/a\\\")}}, related 6h beacons {{local_var.related_beacon_count}}). No Gateway block applied. Verdict SUSPICIOUS - pending. Review alert {{singularity-response-trigger.data.id}} ({{singularity-response-trigger.data.name}}).\"\n}",
+          "parameters": [],
+          "retry_on_status_code": null,
+          "retry_on_status_codes": [500],
+          "ssl_verification": true,
+          "timeout": 30,
+          "headers": { "Content-Type": "application/json" },
+          "use_authentication_data": true,
+          "use_proxy": false,
+          "redirect_follow": true,
+          "continue_on_fail": true,
+          "body_type": null
+        },
+        "state": "active",
+        "description": "Post the monitor-only summary to the SOC Slack channel for analyst review.",
+        "client_data": { "position": { "x": 340, "y": 2478 }, "dimensions": { "width": 256, "height": 76 }, "collapsed": false },
+        "snippet_workflow_id": null,
+        "snippet_version_id": null
+      },
+      "export_id": 55,
+      "connected_to": [{ "target": 54, "custom_handle": null }],
+      "parent_action": null
+    },
+    {
+      "action": {
+        "type": "send_email",
+        "tag": "core_action",
+        "connection_id": null,
+        "connection_name": null,
+        "use_connection_name": false,
+        "integration_id": null,
+        "data": {
+          "name": "Email SOC Monitor",
+          "action_type": "send_email",
+          "subject": "[OneFlare] DNS-Tunnel MONITOR (no block) - {{local_var.base_domain}} ({{singularity-response-trigger.data.name}})",
+          "to": ["soc@oneflare.local"],
+          "cc": [],
+          "bcc": [],
+          "reply_to": [],
+          "mime_type": "text/html",
+          "body": "<!DOCTYPE html><html><body><h3>OneFlare DNS-Tunnel - Monitor Only</h3><p>Detection: {{singularity-response-trigger.data.name}} (alert {{singularity-response-trigger.data.id}})</p><p>The base-domain <b>{{local_var.base_domain}}</b> from source {{local_var.src_ip}} did not meet the containment gate: VirusTotal malicious {{Function.DEFAULT(domain-reputation-virustotal.body.data.attributes.last_analysis_stats.malicious, \"n/a\")}}, related 6h beacons {{local_var.related_beacon_count}} (below the 20 sustained threshold).</p><ul><li>Reason: {{local_var.reason}}</li><li>Beacon context: unique labels {{local_var.uniq_labels}}, high-entropy {{local_var.hi_entropy}}, long TXT {{local_var.txt_long}}</li><li>Longest sample: {{local_var.evidence}}</li></ul><p>Verdict: SUSPICIOUS - Pending Confirmation. No Gateway block applied - analyst to review and manually contain if warranted.</p></body></html>",
+          "attachments": [],
+          "continue_on_fail": true
+        },
+        "state": "active",
+        "description": "Email the SOC a monitor-only receipt (no containment taken).",
+        "client_data": { "position": { "x": 340, "y": 2655 }, "dimensions": { "width": 256, "height": 76 }, "collapsed": false },
+        "snippet_workflow_id": null,
+        "snippet_version_id": null
+      },
+      "export_id": 54,
+      "connected_to": [],
+      "parent_action": null
+    }
+  ]
+}

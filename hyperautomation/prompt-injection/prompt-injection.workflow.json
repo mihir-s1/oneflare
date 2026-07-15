@@ -1,0 +1,1380 @@
+{
+  "name": "OneFlare CF-AI-PromptInjection - LLM Abuse Response (Pyxis /api/v1/chat)",
+  "description": "Alert-triggered AI-abuse response for the CF-AI-PromptInjection detection (rule 2519093028014740613): LLM prompt-injection / jailbreak probing of the Pyxis /api/v1/chat endpoint. Extracts the offending src_ip, runs two enrichment arms - (a) an S1 PowerQuery counting the same IP's chat POSTs over 24h (sustained campaign vs single probe) and (b) VirusTotal reputation of the src_ip - then branches on a verdict gate. Confirmed (VT-malicious OR sustained) -> hard-block the src_ip at Cloudflare on the AI endpoint + a zone IP Access block + S1 IOC + raise to TRUE_POSITIVE/HIGH. Unconfirmed single probe -> Cloudflare managed-challenge on the chat route + SUSPICIOUS/MEDIUM (pending confirmation). Both branches add an S1 note carrying the MITRE ATLAS technique (AML.T0054 LLM Prompt Injection / AML.T0057 LLM Data Leakage) and notify the AI-safety/SOC channel. run_automatically=false: analyst approves from the Singularity Response console. Network/identity-level response only - content-level input filtering at the app is complementary.",
+  "actions": [
+    {
+      "action": {
+        "type": "singularity_response_trigger",
+        "tag": "core_action",
+        "connection_id": null,
+        "connection_name": null,
+        "use_connection_name": false,
+        "integration_id": null,
+        "data": {
+          "name": "Singularity Response Trigger",
+          "action_type": "singularity_response_trigger",
+          "filter_groups": [
+            {
+              "condition": {
+                "operator": "and",
+                "conditions": [
+                  {
+                    "input_value": "name",
+                    "compared_value": "CF-AI-PromptInjection",
+                    "comparison_operator": "contains"
+                  },
+                  {
+                    "input_value": "severity",
+                    "compared_value": "[\"HIGH\",\"CRITICAL\"]",
+                    "comparison_operator": "in"
+                  }
+                ]
+              },
+              "is_disabled": false,
+              "run_automatically": false,
+              "event_type": "alert",
+              "event_subtypes": [
+                "CREATE"
+              ]
+            }
+          ]
+        },
+        "state": "active",
+        "description": "Fires on the CF-AI-PromptInjection scheduled detection (rule 2519093028014740613): >=5 chat POSTs from one src_ip to Pyxis /api/v1/chat in 5 min. run_automatically=false -> analyst approves from the Singularity Response console.",
+        "client_data": {
+          "position": {
+            "x": 0,
+            "y": 0
+          },
+          "dimensions": {
+            "width": 256,
+            "height": 100
+          },
+          "collapsed": false
+        },
+        "snippet_workflow_id": null,
+        "snippet_version_id": null
+      },
+      "export_id": 100,
+      "connected_to": [
+        {
+          "target": 99,
+          "custom_handle": null
+        }
+      ],
+      "parent_action": null
+    },
+    {
+      "action": {
+        "type": "variable",
+        "tag": "core_action",
+        "connection_id": null,
+        "connection_name": null,
+        "use_connection_name": false,
+        "integration_id": null,
+        "data": {
+          "name": "Attacker Source IP",
+          "action_type": "variable",
+          "variables": [
+            {
+              "name": "client_ip",
+              "value": "{{Function.DEFAULT(singularity-response-trigger.data.indicators[0].value, \"no-ip\")}}",
+              "should_use_as_output": false,
+              "is_secret": false
+            }
+          ],
+          "variables_scope": "local"
+        },
+        "state": "active",
+        "description": "Real origin src_ip of the prompt-injection burst, taken from the alert indicator (the detection groups by src_endpoint.ip).",
+        "client_data": {
+          "position": {
+            "x": 0,
+            "y": 177
+          },
+          "dimensions": {
+            "width": 256,
+            "height": 76
+          },
+          "collapsed": false
+        },
+        "snippet_workflow_id": null,
+        "snippet_version_id": null
+      },
+      "export_id": 99,
+      "connected_to": [
+        {
+          "target": 98,
+          "custom_handle": null
+        }
+      ],
+      "parent_action": null
+    },
+    {
+      "action": {
+        "type": "variable",
+        "tag": "core_action",
+        "connection_id": null,
+        "connection_name": null,
+        "use_connection_name": false,
+        "integration_id": null,
+        "data": {
+          "name": "AI Abuse Context",
+          "action_type": "variable",
+          "variables": [
+            {
+              "name": "ai_host",
+              "value": "{{Function.DEFAULT(singularity-response-trigger.data.host, \"api.one-flare.com\")}}",
+              "should_use_as_output": false,
+              "is_secret": false
+            },
+            {
+              "name": "ai_endpoint",
+              "value": "/api/v1/chat",
+              "should_use_as_output": false,
+              "is_secret": false
+            },
+            {
+              "name": "atlas_technique",
+              "value": "AML.T0054",
+              "should_use_as_output": false,
+              "is_secret": false
+            },
+            {
+              "name": "atlas_technique_name",
+              "value": "LLM Prompt Injection",
+              "should_use_as_output": false,
+              "is_secret": false
+            },
+            {
+              "name": "atlas_exfil_technique",
+              "value": "AML.T0057",
+              "should_use_as_output": false,
+              "is_secret": false
+            },
+            {
+              "name": "injection_posts",
+              "value": "{{Function.DEFAULT(singularity-response-trigger.data.injection_posts, \"n/a\")}}",
+              "should_use_as_output": false,
+              "is_secret": false
+            },
+            {
+              "name": "distinct_uas",
+              "value": "{{Function.DEFAULT(singularity-response-trigger.data.distinct_uas, \"n/a\")}}",
+              "should_use_as_output": false,
+              "is_secret": false
+            },
+            {
+              "name": "sample_ua",
+              "value": "{{Function.DEFAULT(singularity-response-trigger.data.sample_ua, \"n/a\")}}",
+              "should_use_as_output": false,
+              "is_secret": false
+            }
+          ],
+          "variables_scope": "local"
+        },
+        "state": "active",
+        "description": "Affected AI endpoint, MITRE ATLAS technique IDs (AML.T0054 LLM Prompt Injection / AML.T0057 LLM Data Leakage), and the alert's own volumetric markers. All values are independent literals or trigger fields (safe to co-locate; none reference another local_var).",
+        "client_data": {
+          "position": {
+            "x": 0,
+            "y": 354
+          },
+          "dimensions": {
+            "width": 256,
+            "height": 76
+          },
+          "collapsed": false
+        },
+        "snippet_workflow_id": null,
+        "snippet_version_id": null
+      },
+      "export_id": 98,
+      "connected_to": [
+        {
+          "target": 97,
+          "custom_handle": null
+        }
+      ],
+      "parent_action": null
+    },
+    {
+      "action": {
+        "type": "variable",
+        "tag": "core_action",
+        "connection_id": null,
+        "connection_name": null,
+        "use_connection_name": false,
+        "integration_id": null,
+        "data": {
+          "name": "Related Search Query",
+          "action_type": "variable",
+          "variables": [
+            {
+              "name": "pq_query",
+              "value": "class_uid=4002 dataSource.cloudflare_dataset='HTTP Requests' src_endpoint.ip='{{local_var.client_ip}}' | filter http_request.url.url_string contains:anycase(\"/chat\") | filter http_request.http_method='POST' | group total_chat_posts=count(), distinct_paths=estimate_distinct(http_request.url.url_string) by src_endpoint.ip | sort -total_chat_posts | limit 5",
+              "should_use_as_output": false,
+              "is_secret": false
+            }
+          ],
+          "variables_scope": "local"
+        },
+        "state": "active",
+        "description": "PowerQuery that counts ALL chat POSTs from this src_ip in the lookback window -> distinguishes a sustained jailbreak campaign from a single probe. Built in its own Variable action because it references {{local_var.client_ip}}.",
+        "client_data": {
+          "position": {
+            "x": 0,
+            "y": 531
+          },
+          "dimensions": {
+            "width": 256,
+            "height": 76
+          },
+          "collapsed": false
+        },
+        "snippet_workflow_id": null,
+        "snippet_version_id": null
+      },
+      "export_id": 97,
+      "connected_to": [
+        {
+          "target": 96,
+          "custom_handle": null
+        }
+      ],
+      "parent_action": null
+    },
+    {
+      "action": {
+        "type": "http_request",
+        "tag": "integration",
+        "connection_id": null,
+        "connection_name": "",
+        "use_connection_name": false,
+        "integration_id": null,
+        "data": {
+          "name": "S1 Related Chat Abuse Search",
+          "action_type": "http_request",
+          "public_action_id": "sentinelone-sdl-powerquery",
+          "method": "post",
+          "url": "{{Connection.protocol}}{{Connection.url}}/api/<@powerQuery@>",
+          "url_path": null,
+          "url_prefix": null,
+          "payload": "{\n  \"query\": \"{{local_var.pq_query}}\",\n  \"startTime\": \"24h\",\n  \"endTime\": \"0h\"\n}",
+          "parameters": [],
+          "retry_on_status_code": null,
+          "retry_on_status_codes": [
+            500
+          ],
+          "ssl_verification": true,
+          "timeout": 60,
+          "headers": {
+            "Content-Type": "application/json",
+            "accept": "application/json"
+          },
+          "use_authentication_data": true,
+          "use_proxy": false,
+          "redirect_follow": true,
+          "continue_on_fail": true,
+          "body_type": null
+        },
+        "state": "active",
+        "description": "Enrichment arm (a): run the related-search PowerQuery over the SDL. REQUIRES the 'SentinelOne SDL' (Bearer) connection, NOT the 'SentinelOne' (ApiToken) connection. continue_on_fail so a lookup error still lets containment proceed.",
+        "client_data": {
+          "position": {
+            "x": 0,
+            "y": 708
+          },
+          "dimensions": {
+            "width": 256,
+            "height": 76
+          },
+          "collapsed": false
+        },
+        "snippet_workflow_id": null,
+        "snippet_version_id": null
+      },
+      "export_id": 96,
+      "connected_to": [
+        {
+          "target": 95,
+          "custom_handle": null
+        }
+      ],
+      "parent_action": null
+    },
+    {
+      "action": {
+        "type": "variable",
+        "tag": "core_action",
+        "connection_id": null,
+        "connection_name": null,
+        "use_connection_name": false,
+        "integration_id": null,
+        "data": {
+          "name": "Related Chat Posts",
+          "action_type": "variable",
+          "variables": [
+            {
+              "name": "related_chat_posts",
+              "value": "{{Function.DEFAULT(s1-related-chat-abuse-search.body.data.values[0][1], \"0\")}}",
+              "should_use_as_output": false,
+              "is_secret": false
+            }
+          ],
+          "variables_scope": "local"
+        },
+        "state": "active",
+        "description": "Total chat POSTs from this src_ip in 24h (from the PowerQuery result). Best-effort JSON path (data.values[0][1]) -> confirm against the tenant's DV response shape; DEFAULT 0 keeps the flow safe.",
+        "client_data": {
+          "position": {
+            "x": 0,
+            "y": 885
+          },
+          "dimensions": {
+            "width": 256,
+            "height": 76
+          },
+          "collapsed": false
+        },
+        "snippet_workflow_id": null,
+        "snippet_version_id": null
+      },
+      "export_id": 95,
+      "connected_to": [
+        {
+          "target": 94,
+          "custom_handle": null
+        }
+      ],
+      "parent_action": null
+    },
+    {
+      "action": {
+        "type": "http_request",
+        "tag": "core_action",
+        "connection_id": null,
+        "connection_name": null,
+        "use_connection_name": false,
+        "integration_id": null,
+        "data": {
+          "name": "VirusTotal IP Reputation",
+          "action_type": "http_request",
+          "public_action_id": null,
+          "method": "get",
+          "url": "https://www.virustotal.com/api/v3/ip_addresses/{{local_var.client_ip}}",
+          "url_path": null,
+          "url_prefix": null,
+          "payload": null,
+          "parameters": [],
+          "retry_on_status_code": null,
+          "retry_on_status_codes": [
+            500
+          ],
+          "ssl_verification": true,
+          "timeout": 30,
+          "headers": {
+            "x-apikey": "<set-VT_API_KEY-after-import>",
+            "Content-Type": "application/json"
+          },
+          "use_authentication_data": false,
+          "use_proxy": false,
+          "redirect_follow": true,
+          "continue_on_fail": true,
+          "body_type": null
+        },
+        "state": "active",
+        "description": "Enrichment arm (b): VirusTotal reputation of the src_ip. Core HTTP (no integration) -> set the x-apikey header to a VirusTotal API key after import; do not commit the real key. continue_on_fail true.",
+        "client_data": {
+          "position": {
+            "x": 0,
+            "y": 1062
+          },
+          "dimensions": {
+            "width": 256,
+            "height": 76
+          },
+          "collapsed": false
+        },
+        "snippet_workflow_id": null,
+        "snippet_version_id": null
+      },
+      "export_id": 94,
+      "connected_to": [
+        {
+          "target": 93,
+          "custom_handle": null
+        }
+      ],
+      "parent_action": null
+    },
+    {
+      "action": {
+        "type": "variable",
+        "tag": "core_action",
+        "connection_id": null,
+        "connection_name": null,
+        "use_connection_name": false,
+        "integration_id": null,
+        "data": {
+          "name": "VT Malicious Count",
+          "action_type": "variable",
+          "variables": [
+            {
+              "name": "vt_malicious",
+              "value": "{{Function.DEFAULT(virustotal-ip-reputation.body.data.attributes.last_analysis_stats.malicious, \"0\")}}",
+              "should_use_as_output": false,
+              "is_secret": false
+            }
+          ],
+          "variables_scope": "local"
+        },
+        "state": "active",
+        "description": "Number of VT engines flagging the src_ip as malicious (DEFAULT 0). Feeds the verdict gate.",
+        "client_data": {
+          "position": {
+            "x": 0,
+            "y": 1239
+          },
+          "dimensions": {
+            "width": 256,
+            "height": 76
+          },
+          "collapsed": false
+        },
+        "snippet_workflow_id": null,
+        "snippet_version_id": null
+      },
+      "export_id": 93,
+      "connected_to": [
+        {
+          "target": 92,
+          "custom_handle": null
+        }
+      ],
+      "parent_action": null
+    },
+    {
+      "action": {
+        "type": "condition",
+        "tag": "core_action",
+        "connection_id": null,
+        "connection_name": null,
+        "use_connection_name": false,
+        "integration_id": null,
+        "data": {
+          "name": "IP Resolved",
+          "action_type": "condition",
+          "condition_type": "multi",
+          "condition": null,
+          "conditions": [
+            {
+              "input_value": "{{local_var.client_ip}}",
+              "compared_value": "no-ip",
+              "comparison_operator": "not_equals"
+            }
+          ],
+          "conditions_relationship": "and"
+        },
+        "state": "active",
+        "description": "Gate every response action on a real src_ip having been extracted from the alert.",
+        "client_data": {
+          "position": {
+            "x": 0,
+            "y": 1416
+          },
+          "dimensions": {
+            "width": 256,
+            "height": 76
+          },
+          "collapsed": false
+        },
+        "snippet_workflow_id": null,
+        "snippet_version_id": null
+      },
+      "export_id": 92,
+      "connected_to": [
+        {
+          "target": 91,
+          "custom_handle": "true"
+        },
+        {
+          "target": 79,
+          "custom_handle": "false"
+        }
+      ],
+      "parent_action": null
+    },
+    {
+      "action": {
+        "type": "variable",
+        "tag": "core_action",
+        "connection_id": null,
+        "connection_name": null,
+        "use_connection_name": false,
+        "integration_id": null,
+        "data": {
+          "name": "No IP Note Text",
+          "action_type": "variable",
+          "variables": [
+            {
+              "name": "noip_note",
+              "value": "CF-AI-PromptInjection alert {{singularity-response-trigger.data.id}} fired but no src_ip indicator was present on the alert. No automated Cloudflare/identity action taken. Manual review required: confirm the offending src_ip from the detection columns and re-run containment. MITRE ATLAS {{local_var.atlas_technique}} ({{local_var.atlas_technique_name}}).",
+              "should_use_as_output": false,
+              "is_secret": false
+            }
+          ],
+          "variables_scope": "local"
+        },
+        "state": "active",
+        "description": "Note body for the no-src_ip path (own Variable action; referenced bare by HTML_ENCODE).",
+        "client_data": {
+          "position": {
+            "x": 560,
+            "y": 1593
+          },
+          "dimensions": {
+            "width": 256,
+            "height": 76
+          },
+          "collapsed": false
+        },
+        "snippet_workflow_id": null,
+        "snippet_version_id": null
+      },
+      "export_id": 79,
+      "connected_to": [
+        {
+          "target": 80,
+          "custom_handle": null
+        }
+      ],
+      "parent_action": null
+    },
+    {
+      "action": {
+        "type": "http_request",
+        "tag": "integration",
+        "connection_id": null,
+        "connection_name": "",
+        "use_connection_name": false,
+        "integration_id": null,
+        "data": {
+          "name": "S1 Note No IP",
+          "action_type": "http_request",
+          "public_action_id": "sentinelone-add-alert-note",
+          "method": "post",
+          "url": "{{Connection.protocol}}{{Connection.url}}/web/api/v2.1/unifiedalerts/graphql",
+          "url_path": null,
+          "url_prefix": null,
+          "payload": "{\n  \"query\": \"mutation AddAlertNote { addAlertNote(text: \\\"{{Function.HTML_ENCODE(local_var.noip_note)}}\\\", alertId: \\\"{{singularity-response-trigger.data.id}}\\\") { data { alertId } } }\"\n}",
+          "parameters": [],
+          "retry_on_status_code": null,
+          "retry_on_status_codes": [
+            500
+          ],
+          "ssl_verification": true,
+          "timeout": 30,
+          "headers": {
+            "Content-Type": "application/json"
+          },
+          "use_authentication_data": true,
+          "use_proxy": false,
+          "redirect_follow": true,
+          "continue_on_fail": true,
+          "body_type": null
+        },
+        "state": "active",
+        "description": "FALSE branch: annotate the alert that no src_ip was available and manual review is needed. Terminal.",
+        "client_data": {
+          "position": {
+            "x": 560,
+            "y": 1770
+          },
+          "dimensions": {
+            "width": 256,
+            "height": 76
+          },
+          "collapsed": false
+        },
+        "snippet_workflow_id": null,
+        "snippet_version_id": null
+      },
+      "export_id": 80,
+      "connected_to": [],
+      "parent_action": null
+    },
+    {
+      "action": {
+        "type": "condition",
+        "tag": "core_action",
+        "connection_id": null,
+        "connection_name": null,
+        "use_connection_name": false,
+        "integration_id": null,
+        "data": {
+          "name": "Malicious Or Sustained",
+          "action_type": "condition",
+          "condition_type": "simple",
+          "condition": {
+            "operator": "or",
+            "conditions": [
+              {
+                "input_value": "{{local_var.vt_malicious}}",
+                "compared_value": "0",
+                "comparison_operator": "greater_than"
+              },
+              {
+                "input_value": "{{local_var.related_chat_posts}}",
+                "compared_value": "5",
+                "comparison_operator": "greater_than_or_equals"
+              }
+            ]
+          },
+          "conditions": null
+        },
+        "state": "active",
+        "description": "Verdict gate (evidence discipline): TRUE (block) if VT flags the IP malicious OR the src_ip issued >=5 chat POSTs in 24h (sustained campaign). FALSE (single clean probe) -> challenge + monitor. Uses simple/nested 'or' -> the schema-sanctioned way to OR two different signals.",
+        "client_data": {
+          "position": {
+            "x": 0,
+            "y": 1593
+          },
+          "dimensions": {
+            "width": 256,
+            "height": 76
+          },
+          "collapsed": false
+        },
+        "snippet_workflow_id": null,
+        "snippet_version_id": null
+      },
+      "export_id": 91,
+      "connected_to": [
+        {
+          "target": 90,
+          "custom_handle": "true"
+        },
+        {
+          "target": 70,
+          "custom_handle": "false"
+        }
+      ],
+      "parent_action": null
+    },
+    {
+      "action": {
+        "type": "http_request",
+        "tag": "integration",
+        "connection_id": null,
+        "connection_name": "",
+        "use_connection_name": false,
+        "integration_id": null,
+        "data": {
+          "name": "CF Block IP On Chat Route",
+          "action_type": "http_request",
+          "public_action_id": "cloudflare-create-firewall-rules",
+          "method": "post",
+          "url": "{{Connection.protocol}}{{Connection.url}}/client/v4/zones/{{Connection.zone_id}}/firewall/rules",
+          "url_path": null,
+          "url_prefix": null,
+          "payload": "[{\n  \"action\": \"block\",\n  \"description\": \"OneFlare CF-AI-PromptInjection - block src_ip on Pyxis /api/v1/chat (alert {{singularity-response-trigger.data.id}})\",\n  \"filter\": { \"expression\": \"(http.request.uri.path eq \\\"/api/v1/chat\\\" and ip.src eq \\\"{{local_var.client_ip}}\\\")\" }\n}]",
+          "parameters": [],
+          "retry_on_status_code": null,
+          "retry_on_status_codes": [
+            500
+          ],
+          "ssl_verification": true,
+          "timeout": 30,
+          "headers": {
+            "Content-Type": "application/json",
+            "accept": "application/json"
+          },
+          "use_authentication_data": true,
+          "use_proxy": false,
+          "redirect_follow": true,
+          "continue_on_fail": false,
+          "body_type": null
+        },
+        "state": "active",
+        "description": "BLOCK: Cloudflare WAF/firewall rule that blocks THIS src_ip specifically on the AI endpoint /api/v1/chat (scoped so the rest of the API stays reachable).",
+        "client_data": {
+          "position": {
+            "x": -320,
+            "y": 1770
+          },
+          "dimensions": {
+            "width": 256,
+            "height": 76
+          },
+          "collapsed": false
+        },
+        "snippet_workflow_id": null,
+        "snippet_version_id": null
+      },
+      "export_id": 90,
+      "connected_to": [
+        {
+          "target": 89,
+          "custom_handle": null
+        }
+      ],
+      "parent_action": null
+    },
+    {
+      "action": {
+        "type": "http_request",
+        "tag": "integration",
+        "connection_id": null,
+        "connection_name": "",
+        "use_connection_name": false,
+        "integration_id": null,
+        "data": {
+          "name": "CF IP Access Block",
+          "action_type": "http_request",
+          "public_action_id": "cloudflare-create-ip-access-rule",
+          "method": "post",
+          "url": "{{Connection.protocol}}{{Connection.url}}/client/v4/zones/{{Connection.zone_id}}/firewall/access_rules/rules",
+          "url_path": null,
+          "url_prefix": null,
+          "payload": "{\n  \"mode\": \"block\",\n  \"configuration\": { \"target\": \"ip\", \"value\": \"{{local_var.client_ip}}\" },\n  \"notes\": \"OneFlare CF-AI-PromptInjection auto-block - alert {{singularity-response-trigger.data.id}}\"\n}",
+          "parameters": [],
+          "retry_on_status_code": null,
+          "retry_on_status_codes": [
+            500
+          ],
+          "ssl_verification": true,
+          "timeout": 30,
+          "headers": {
+            "Content-Type": "application/json",
+            "accept": "application/json"
+          },
+          "use_authentication_data": true,
+          "use_proxy": false,
+          "redirect_follow": true,
+          "continue_on_fail": true,
+          "body_type": null
+        },
+        "state": "active",
+        "description": "BLOCK: zone-wide Cloudflare IP Access rule for the confirmed-malicious src_ip (defense in depth beyond the chat-route rule).",
+        "client_data": {
+          "position": {
+            "x": -320,
+            "y": 1947
+          },
+          "dimensions": {
+            "width": 256,
+            "height": 76
+          },
+          "collapsed": false
+        },
+        "snippet_workflow_id": null,
+        "snippet_version_id": null
+      },
+      "export_id": 89,
+      "connected_to": [
+        {
+          "target": 83,
+          "custom_handle": null
+        }
+      ],
+      "parent_action": null
+    },
+    {
+      "action": {
+        "type": "variable",
+        "tag": "core_action",
+        "connection_id": null,
+        "connection_name": null,
+        "use_connection_name": false,
+        "integration_id": null,
+        "data": {
+          "name": "Block Note Text",
+          "action_type": "variable",
+          "variables": [
+            {
+              "name": "block_note",
+              "value": "CONFIRMED LLM abuse response (auto-contained). Technique: MITRE ATLAS {{local_var.atlas_technique}} {{local_var.atlas_technique_name}} + {{local_var.atlas_exfil_technique}} (LLM Data Leakage). Endpoint: {{local_var.ai_host}}{{local_var.ai_endpoint}}. Src IP: {{local_var.client_ip}}. Injection POSTs in alert window: {{local_var.injection_posts}} (distinct UAs {{local_var.distinct_uas}}, sample UA {{local_var.sample_ua}}). Correlated chat POSTs from this IP over 24h: {{local_var.related_chat_posts}}. VirusTotal malicious engines: {{local_var.vt_malicious}}. Action: Cloudflare block on /api/v1/chat + zone IP Access block + S1 IOC. Alert {{singularity-response-trigger.data.id}}.",
+              "should_use_as_output": false,
+              "is_secret": false
+            }
+          ],
+          "variables_scope": "local"
+        },
+        "state": "active",
+        "description": "Rich note body for the confirmed/block path (own Variable action; references earlier local_vars; referenced bare by HTML_ENCODE).",
+        "client_data": {
+          "position": {
+            "x": -320,
+            "y": 2124
+          },
+          "dimensions": {
+            "width": 256,
+            "height": 76
+          },
+          "collapsed": false
+        },
+        "snippet_workflow_id": null,
+        "snippet_version_id": null
+      },
+      "export_id": 83,
+      "connected_to": [
+        {
+          "target": 88,
+          "custom_handle": null
+        }
+      ],
+      "parent_action": null
+    },
+    {
+      "action": {
+        "type": "http_request",
+        "tag": "integration",
+        "connection_id": null,
+        "connection_name": "",
+        "use_connection_name": false,
+        "integration_id": null,
+        "data": {
+          "name": "S1 Note Block",
+          "action_type": "http_request",
+          "public_action_id": "sentinelone-add-alert-note",
+          "method": "post",
+          "url": "{{Connection.protocol}}{{Connection.url}}/web/api/v2.1/unifiedalerts/graphql",
+          "url_path": null,
+          "url_prefix": null,
+          "payload": "{\n  \"query\": \"mutation AddAlertNote { addAlertNote(text: \\\"{{Function.HTML_ENCODE(local_var.block_note)}}\\\", alertId: \\\"{{singularity-response-trigger.data.id}}\\\") { data { alertId } } }\"\n}",
+          "parameters": [],
+          "retry_on_status_code": null,
+          "retry_on_status_codes": [
+            500
+          ],
+          "ssl_verification": true,
+          "timeout": 30,
+          "headers": {
+            "Content-Type": "application/json"
+          },
+          "use_authentication_data": true,
+          "use_proxy": false,
+          "redirect_follow": true,
+          "continue_on_fail": true,
+          "body_type": null
+        },
+        "state": "active",
+        "description": "S1 annotation carrying the ATLAS technique tag, endpoint, correlated attempt counts and reputation. This is how the ATLAS technique is recorded on the alert (UAM modern addAlertNote, HTML_ENCODE'd).",
+        "client_data": {
+          "position": {
+            "x": -320,
+            "y": 2301
+          },
+          "dimensions": {
+            "width": 256,
+            "height": 76
+          },
+          "collapsed": false
+        },
+        "snippet_workflow_id": null,
+        "snippet_version_id": null
+      },
+      "export_id": 88,
+      "connected_to": [
+        {
+          "target": 87,
+          "custom_handle": null
+        }
+      ],
+      "parent_action": null
+    },
+    {
+      "action": {
+        "type": "http_request",
+        "tag": "integration",
+        "connection_id": null,
+        "connection_name": "",
+        "use_connection_name": false,
+        "integration_id": null,
+        "data": {
+          "name": "S1 Raise Confidence",
+          "action_type": "http_request",
+          "public_action_id": "sentinelone-set-analyst-verdict",
+          "method": "post",
+          "url": "{{Connection.protocol}}{{Connection.url}}/web/api/v2.1/unifiedalerts/graphql",
+          "url_path": null,
+          "url_prefix": null,
+          "payload": "{\n  \"query\": \"mutation SetVerdict { updateAlertAnalystVerdict(analystVerdict: TRUE_POSITIVE, confidenceLevel: HIGH, alertId: \\\"{{singularity-response-trigger.data.id}}\\\") { data { alertId } } }\"\n}",
+          "parameters": [],
+          "retry_on_status_code": null,
+          "retry_on_status_codes": [
+            500
+          ],
+          "ssl_verification": true,
+          "timeout": 30,
+          "headers": {
+            "Content-Type": "application/json"
+          },
+          "use_authentication_data": true,
+          "use_proxy": false,
+          "redirect_follow": true,
+          "continue_on_fail": true,
+          "body_type": null
+        },
+        "state": "active",
+        "description": "Raise the alert to TRUE_POSITIVE / HIGH confidence. Mutation name is a best-effort UAM placeholder -> reconcile updateAlertAnalystVerdict against the tenant's unifiedalerts GraphQL schema after import.",
+        "client_data": {
+          "position": {
+            "x": -320,
+            "y": 2301
+          },
+          "dimensions": {
+            "width": 256,
+            "height": 76
+          },
+          "collapsed": false
+        },
+        "snippet_workflow_id": null,
+        "snippet_version_id": null
+      },
+      "export_id": 87,
+      "connected_to": [
+        {
+          "target": 86,
+          "custom_handle": null
+        }
+      ],
+      "parent_action": null
+    },
+    {
+      "action": {
+        "type": "http_request",
+        "tag": "integration",
+        "connection_id": null,
+        "connection_name": "",
+        "use_connection_name": false,
+        "integration_id": null,
+        "data": {
+          "name": "Add S1 IOC",
+          "action_type": "http_request",
+          "public_action_id": "sentinelone-create-ioc",
+          "method": "post",
+          "url": "{{Connection.protocol}}{{Connection.url}}/web/api/v2.1/threat-intelligence/iocs",
+          "url_path": null,
+          "url_prefix": null,
+          "payload": "{\n  \"data\": [{\n    \"type\": \"IPV4\",\n    \"value\": \"{{local_var.client_ip}}\",\n    \"method\": \"EQUALS\",\n    \"source\": \"OneFlare Hyperautomation\",\n    \"name\": \"CF-AI-PromptInjection src_ip (Pyxis /api/v1/chat)\",\n    \"description\": \"Auto-added from CF-AI-PromptInjection alert {{singularity-response-trigger.data.id}}; ATLAS {{local_var.atlas_technique}}; VT malicious {{local_var.vt_malicious}}; 24h chat POSTs {{local_var.related_chat_posts}}\",\n    \"category\": \"ml-attack\",\n    \"externalId\": \"OneFlare-AI\",\n    \"originalRiskScore\": \"90\",\n    \"creationTime\": \"{{Function.DATETIME_NOW()}}\",\n    \"validUntil\": \"{{Function.DELTA_NOW(-168)}}\"\n  }],\n  \"filter\": { \"accountIds\": [\"{{singularity-response-trigger.data.scopeId}}\"] }\n}",
+          "parameters": [],
+          "retry_on_status_code": null,
+          "retry_on_status_codes": [
+            500
+          ],
+          "ssl_verification": true,
+          "timeout": 30,
+          "headers": {
+            "Content-Type": "application/json",
+            "accept": "application/json"
+          },
+          "use_authentication_data": true,
+          "use_proxy": false,
+          "redirect_follow": true,
+          "continue_on_fail": true,
+          "body_type": null
+        },
+        "state": "active",
+        "description": "Create an S1 Threat-Intel IOC (IPV4, ml-attack, risk 90, validUntil = 7 days forward) for the confirmed src_ip.",
+        "client_data": {
+          "position": {
+            "x": -320,
+            "y": 2478
+          },
+          "dimensions": {
+            "width": 256,
+            "height": 76
+          },
+          "collapsed": false
+        },
+        "snippet_workflow_id": null,
+        "snippet_version_id": null
+      },
+      "export_id": 86,
+      "connected_to": [
+        {
+          "target": 85,
+          "custom_handle": null
+        }
+      ],
+      "parent_action": null
+    },
+    {
+      "action": {
+        "type": "http_request",
+        "tag": "integration",
+        "connection_id": null,
+        "connection_name": "",
+        "use_connection_name": false,
+        "integration_id": null,
+        "data": {
+          "name": "Notify AI Safety SOC Block",
+          "action_type": "http_request",
+          "public_action_id": "slack-post-message",
+          "method": "post",
+          "url": "https://slack.com/api/chat.postMessage",
+          "url_path": null,
+          "url_prefix": null,
+          "payload": "{\n  \"channel\": \"#ai-security-soc\",\n  \"text\": \"CONTAINED - LLM prompt injection (ATLAS {{local_var.atlas_technique}}) on {{local_var.ai_host}}{{local_var.ai_endpoint}}. src_ip {{local_var.client_ip}} BLOCKED at Cloudflare (chat route + zone) + S1 IOC. VT malicious {{local_var.vt_malicious}}, 24h chat POSTs {{local_var.related_chat_posts}}. Alert {{singularity-response-trigger.data.id}} ({{singularity-response-trigger.data.name}}).\"\n}",
+          "parameters": [],
+          "retry_on_status_code": null,
+          "retry_on_status_codes": [
+            500
+          ],
+          "ssl_verification": true,
+          "timeout": 30,
+          "headers": {
+            "Content-Type": "application/json"
+          },
+          "use_authentication_data": true,
+          "use_proxy": false,
+          "redirect_follow": true,
+          "continue_on_fail": true,
+          "body_type": null
+        },
+        "state": "active",
+        "description": "Page the AI-safety / SOC Slack channel with the block-level containment summary.",
+        "client_data": {
+          "position": {
+            "x": -320,
+            "y": 2655
+          },
+          "dimensions": {
+            "width": 256,
+            "height": 76
+          },
+          "collapsed": false
+        },
+        "snippet_workflow_id": null,
+        "snippet_version_id": null
+      },
+      "export_id": 85,
+      "connected_to": [
+        {
+          "target": 84,
+          "custom_handle": null
+        }
+      ],
+      "parent_action": null
+    },
+    {
+      "action": {
+        "type": "send_email",
+        "tag": "core_action",
+        "connection_id": null,
+        "connection_name": null,
+        "use_connection_name": false,
+        "integration_id": null,
+        "data": {
+          "name": "Send Email Block",
+          "action_type": "send_email",
+          "subject": "[OneFlare] LLM prompt injection CONTAINED - {{singularity-response-trigger.data.name}}",
+          "to": [
+            "soc@one-flare.com"
+          ],
+          "cc": [],
+          "bcc": [],
+          "reply_to": [],
+          "mime_type": "text/html",
+          "body": "<!DOCTYPE html><html><body><h3>OneFlare - LLM Prompt Injection Contained</h3><p>Detection: {{singularity-response-trigger.data.name}} (alert {{singularity-response-trigger.data.id}})</p><ul><li>MITRE ATLAS: {{local_var.atlas_technique}} {{local_var.atlas_technique_name}} / {{local_var.atlas_exfil_technique}}</li><li>Endpoint: {{local_var.ai_host}}{{local_var.ai_endpoint}}</li><li>src_ip BLOCKED: {{local_var.client_ip}} (chat route + zone IP Access)</li><li>24h chat POSTs from IP: {{local_var.related_chat_posts}}; VT malicious engines: {{local_var.vt_malicious}}</li><li>S1 IOC created (IPV4, ml-attack)</li></ul></body></html>",
+          "attachments": [],
+          "continue_on_fail": true
+        },
+        "state": "active",
+        "description": "Email the SOC distribution a block-level containment receipt. Terminal.",
+        "client_data": {
+          "position": {
+            "x": -320,
+            "y": 2832
+          },
+          "dimensions": {
+            "width": 256,
+            "height": 76
+          },
+          "collapsed": false
+        },
+        "snippet_workflow_id": null,
+        "snippet_version_id": null
+      },
+      "export_id": 84,
+      "connected_to": [],
+      "parent_action": null
+    },
+    {
+      "action": {
+        "type": "http_request",
+        "tag": "integration",
+        "connection_id": null,
+        "connection_name": "",
+        "use_connection_name": false,
+        "integration_id": null,
+        "data": {
+          "name": "CF Challenge IP On Chat Route",
+          "action_type": "http_request",
+          "public_action_id": "cloudflare-create-firewall-rules",
+          "method": "post",
+          "url": "{{Connection.protocol}}{{Connection.url}}/client/v4/zones/{{Connection.zone_id}}/firewall/rules",
+          "url_path": null,
+          "url_prefix": null,
+          "payload": "[{\n  \"action\": \"managed_challenge\",\n  \"description\": \"OneFlare CF-AI-PromptInjection - challenge src_ip on Pyxis /api/v1/chat (unconfirmed, alert {{singularity-response-trigger.data.id}})\",\n  \"filter\": { \"expression\": \"(http.request.uri.path eq \\\"/api/v1/chat\\\" and ip.src eq \\\"{{local_var.client_ip}}\\\")\" }\n}]",
+          "parameters": [],
+          "retry_on_status_code": null,
+          "retry_on_status_codes": [
+            500
+          ],
+          "ssl_verification": true,
+          "timeout": 30,
+          "headers": {
+            "Content-Type": "application/json",
+            "accept": "application/json"
+          },
+          "use_authentication_data": true,
+          "use_proxy": false,
+          "redirect_follow": true,
+          "continue_on_fail": false,
+          "body_type": null
+        },
+        "state": "active",
+        "description": "CHALLENGE: single unconfirmed probe from a clean IP -> managed-challenge (Turnstile) the src_ip on /api/v1/chat instead of a hard block. A rate-limit rule (CF Rulesets API) is the alternative escalation - see README.",
+        "client_data": {
+          "position": {
+            "x": 320,
+            "y": 1770
+          },
+          "dimensions": {
+            "width": 256,
+            "height": 76
+          },
+          "collapsed": false
+        },
+        "snippet_workflow_id": null,
+        "snippet_version_id": null
+      },
+      "export_id": 70,
+      "connected_to": [
+        {
+          "target": 66,
+          "custom_handle": null
+        }
+      ],
+      "parent_action": null
+    },
+    {
+      "action": {
+        "type": "variable",
+        "tag": "core_action",
+        "connection_id": null,
+        "connection_name": null,
+        "use_connection_name": false,
+        "integration_id": null,
+        "data": {
+          "name": "Monitor Note Text",
+          "action_type": "variable",
+          "variables": [
+            {
+              "name": "monitor_note",
+              "value": "MONITOR - possible LLM prompt injection (unconfirmed). Technique: MITRE ATLAS {{local_var.atlas_technique}} {{local_var.atlas_technique_name}}. Endpoint: {{local_var.ai_host}}{{local_var.ai_endpoint}}. Src IP: {{local_var.client_ip}}. Injection POSTs in alert window: {{local_var.injection_posts}}. Correlated 24h chat POSTs: {{local_var.related_chat_posts}}. VT malicious: {{local_var.vt_malicious}} (clean). Action: Cloudflare managed-challenge on /api/v1/chat only; NOT hard-blocked pending confirmation. Alert {{singularity-response-trigger.data.id}}.",
+              "should_use_as_output": false,
+              "is_secret": false
+            }
+          ],
+          "variables_scope": "local"
+        },
+        "state": "active",
+        "description": "Note body for the monitor/challenge path (own Variable action; referenced bare by HTML_ENCODE).",
+        "client_data": {
+          "position": {
+            "x": 320,
+            "y": 1947
+          },
+          "dimensions": {
+            "width": 256,
+            "height": 76
+          },
+          "collapsed": false
+        },
+        "snippet_workflow_id": null,
+        "snippet_version_id": null
+      },
+      "export_id": 66,
+      "connected_to": [
+        {
+          "target": 69,
+          "custom_handle": null
+        }
+      ],
+      "parent_action": null
+    },
+    {
+      "action": {
+        "type": "http_request",
+        "tag": "integration",
+        "connection_id": null,
+        "connection_name": "",
+        "use_connection_name": false,
+        "integration_id": null,
+        "data": {
+          "name": "S1 Note Monitor",
+          "action_type": "http_request",
+          "public_action_id": "sentinelone-add-alert-note",
+          "method": "post",
+          "url": "{{Connection.protocol}}{{Connection.url}}/web/api/v2.1/unifiedalerts/graphql",
+          "url_path": null,
+          "url_prefix": null,
+          "payload": "{\n  \"query\": \"mutation AddAlertNote { addAlertNote(text: \\\"{{Function.HTML_ENCODE(local_var.monitor_note)}}\\\", alertId: \\\"{{singularity-response-trigger.data.id}}\\\") { data { alertId } } }\"\n}",
+          "parameters": [],
+          "retry_on_status_code": null,
+          "retry_on_status_codes": [
+            500
+          ],
+          "ssl_verification": true,
+          "timeout": 30,
+          "headers": {
+            "Content-Type": "application/json"
+          },
+          "use_authentication_data": true,
+          "use_proxy": false,
+          "redirect_follow": true,
+          "continue_on_fail": true,
+          "body_type": null
+        },
+        "state": "active",
+        "description": "S1 annotation on the monitor path: records the ATLAS technique + why containment was soft (challenge, not block).",
+        "client_data": {
+          "position": {
+            "x": 320,
+            "y": 2124
+          },
+          "dimensions": {
+            "width": 256,
+            "height": 76
+          },
+          "collapsed": false
+        },
+        "snippet_workflow_id": null,
+        "snippet_version_id": null
+      },
+      "export_id": 69,
+      "connected_to": [
+        {
+          "target": 68,
+          "custom_handle": null
+        }
+      ],
+      "parent_action": null
+    },
+    {
+      "action": {
+        "type": "http_request",
+        "tag": "integration",
+        "connection_id": null,
+        "connection_name": "",
+        "use_connection_name": false,
+        "integration_id": null,
+        "data": {
+          "name": "S1 Set Suspicious",
+          "action_type": "http_request",
+          "public_action_id": "sentinelone-set-analyst-verdict",
+          "method": "post",
+          "url": "{{Connection.protocol}}{{Connection.url}}/web/api/v2.1/unifiedalerts/graphql",
+          "url_path": null,
+          "url_prefix": null,
+          "payload": "{\n  \"query\": \"mutation SetVerdict { updateAlertAnalystVerdict(analystVerdict: SUSPICIOUS, confidenceLevel: MEDIUM, alertId: \\\"{{singularity-response-trigger.data.id}}\\\") { data { alertId } } }\"\n}",
+          "parameters": [],
+          "retry_on_status_code": null,
+          "retry_on_status_codes": [
+            500
+          ],
+          "ssl_verification": true,
+          "timeout": 30,
+          "headers": {
+            "Content-Type": "application/json"
+          },
+          "use_authentication_data": true,
+          "use_proxy": false,
+          "redirect_follow": true,
+          "continue_on_fail": true,
+          "body_type": null
+        },
+        "state": "active",
+        "description": "Set the alert to SUSPICIOUS / MEDIUM (pending confirmation) - evidence discipline: no TRUE_POSITIVE without TI confirmation. Placeholder mutation name; reconcile after import.",
+        "client_data": {
+          "position": {
+            "x": 320,
+            "y": 2124
+          },
+          "dimensions": {
+            "width": 256,
+            "height": 76
+          },
+          "collapsed": false
+        },
+        "snippet_workflow_id": null,
+        "snippet_version_id": null
+      },
+      "export_id": 68,
+      "connected_to": [
+        {
+          "target": 67,
+          "custom_handle": null
+        }
+      ],
+      "parent_action": null
+    },
+    {
+      "action": {
+        "type": "http_request",
+        "tag": "integration",
+        "connection_id": null,
+        "connection_name": "",
+        "use_connection_name": false,
+        "integration_id": null,
+        "data": {
+          "name": "Notify AI Safety SOC Challenge",
+          "action_type": "http_request",
+          "public_action_id": "slack-post-message",
+          "method": "post",
+          "url": "https://slack.com/api/chat.postMessage",
+          "url_path": null,
+          "url_prefix": null,
+          "payload": "{\n  \"channel\": \"#ai-security-soc\",\n  \"text\": \"MONITOR - possible LLM prompt injection (ATLAS {{local_var.atlas_technique}}) on {{local_var.ai_host}}{{local_var.ai_endpoint}}. src_ip {{local_var.client_ip}} managed-challenged on the chat route (VT clean, 24h chat POSTs {{local_var.related_chat_posts}}). Not hard-blocked - analyst confirmation requested. Alert {{singularity-response-trigger.data.id}}.\"\n}",
+          "parameters": [],
+          "retry_on_status_code": null,
+          "retry_on_status_codes": [
+            500
+          ],
+          "ssl_verification": true,
+          "timeout": 30,
+          "headers": {
+            "Content-Type": "application/json"
+          },
+          "use_authentication_data": true,
+          "use_proxy": false,
+          "redirect_follow": true,
+          "continue_on_fail": true,
+          "body_type": null
+        },
+        "state": "active",
+        "description": "Notify the AI-safety / SOC Slack channel of the soft (challenge/monitor) response. Terminal.",
+        "client_data": {
+          "position": {
+            "x": 320,
+            "y": 2301
+          },
+          "dimensions": {
+            "width": 256,
+            "height": 76
+          },
+          "collapsed": false
+        },
+        "snippet_workflow_id": null,
+        "snippet_version_id": null
+      },
+      "export_id": 67,
+      "connected_to": [],
+      "parent_action": null
+    }
+  ]
+}

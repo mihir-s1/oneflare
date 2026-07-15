@@ -1,0 +1,809 @@
+{
+  "name": "NovaMind Cred-Stuffing / Brute-Force Response (portal.novamind.ai)",
+  "description": "Fires on the CF-Access-CredStuffing scheduled STAR alert (rule 2519093004283366750) — a burst of failed POST /login responses (401/403/429) against the NovaMind employee portal, grouped per src_ip+host. Account-attack playbook: extract the attacking src_ip, gate all downstream work on it being present, then run S1 SDL enrichment (recompute the failed-login volume + distinct User-Agents for the IP, and look for a successful login from that same IP = account-takeover tell) plus AbuseIPDB reputation. Decision branch: if the IP is reputationally malicious OR the recomputed failed_logins is very high OR a login from that IP already succeeded, hard-contain (Cloudflare IP Access block + escalate the portal zone to Under Attack + add an S1 IPV4 IOC + note + raise confidence to SUSPICIOUS + notify SOC). Otherwise apply a lower-risk managed challenge (step-up) and note/monitor. Handles both attack shapes: one IP many passwords (brute force) and one IP replaying many credentials with rotating User-Agents (stuffing) — distinct_uas is the corroborating stuffing signal. run_automatically is false so an analyst approves the destructive path from the Singularity Response console. Evidence discipline: verdict is capped at SUSPICIOUS by automation; the block is gated on an independent AbuseIPDB verdict or a successful-login foothold.",
+  "actions": [
+    {
+      "action": {
+        "type": "singularity_response_trigger",
+        "tag": "core_action",
+        "connection_id": null,
+        "connection_name": null,
+        "use_connection_name": false,
+        "integration_id": null,
+        "data": {
+          "name": "Singularity Response Trigger",
+          "action_type": "singularity_response_trigger",
+          "filter_groups": [
+            {
+              "condition": {
+                "operator": "and",
+                "conditions": [
+                  { "input_value": "severity", "compared_value": "[\"HIGH\",\"CRITICAL\"]", "comparison_operator": "in" },
+                  { "input_value": "name", "compared_value": "CF-Access-CredStuffing", "comparison_operator": "contains" }
+                ]
+              },
+              "is_disabled": false,
+              "run_automatically": false,
+              "event_type": "alert",
+              "event_subtypes": ["CREATE"]
+            }
+          ]
+        },
+        "state": "active",
+        "description": "Fire on the CF-Access-CredStuffing detection (login brute force / credential stuffing on portal.novamind.ai). run_automatically:false = analyst approves the destructive branch.",
+        "client_data": { "position": { "x": 0, "y": 0 }, "dimensions": { "width": 256, "height": 100 }, "collapsed": false },
+        "snippet_workflow_id": null,
+        "snippet_version_id": null
+      },
+      "export_id": 30,
+      "connected_to": [{ "target": 29, "custom_handle": null }],
+      "parent_action": null
+    },
+    {
+      "action": {
+        "type": "variable",
+        "tag": "core_action",
+        "connection_id": null,
+        "connection_name": null,
+        "use_connection_name": false,
+        "integration_id": null,
+        "data": {
+          "name": "Attacker Src IP",
+          "action_type": "variable",
+          "variables": [
+            {
+              "name": "client_ip",
+              "value": "{{Function.DEFAULT(singularity-response-trigger.data.indicators[0].value, \"no-ip\")}}",
+              "should_use_as_output": false,
+              "is_secret": false
+            }
+          ],
+          "variables_scope": "local"
+        },
+        "state": "active",
+        "description": "Attacking src_ip from the alert indicator. DEPENDS on the rule's entityMappings (src_ip) binding the value as an indicator — currently _entityMappings_pending_feature on the deployed rule, so this may resolve to 'no-ip' until asset-enrichment/entityMappings are live. DEFAULT chain makes that a safe, gated no-op rather than a failure.",
+        "client_data": { "position": { "x": 0, "y": 177 }, "dimensions": { "width": 256, "height": 76 }, "collapsed": false },
+        "snippet_workflow_id": null,
+        "snippet_version_id": null
+      },
+      "export_id": 29,
+      "connected_to": [{ "target": 28, "custom_handle": null }],
+      "parent_action": null
+    },
+    {
+      "action": {
+        "type": "condition",
+        "tag": "core_action",
+        "connection_id": null,
+        "connection_name": null,
+        "use_connection_name": false,
+        "integration_id": null,
+        "data": {
+          "name": "Src IP Resolved in Alert",
+          "action_type": "condition",
+          "condition_type": "multi",
+          "condition": null,
+          "conditions": [
+            { "input_value": "{{local_var.client_ip}}", "compared_value": "no-ip", "comparison_operator": "not_equals" }
+          ],
+          "conditions_relationship": "and"
+        },
+        "state": "active",
+        "description": "Gate everything on a real src_ip. TRUE -> enrich + respond. FALSE -> note the gap and stop (no destructive action without a target IP).",
+        "client_data": { "position": { "x": 0, "y": 354 }, "dimensions": { "width": 256, "height": 76 }, "collapsed": false },
+        "snippet_workflow_id": null,
+        "snippet_version_id": null
+      },
+      "export_id": 28,
+      "connected_to": [
+        { "target": 27, "custom_handle": "true" },
+        { "target": 5, "custom_handle": "false" }
+      ],
+      "parent_action": null
+    },
+    {
+      "action": {
+        "type": "variable",
+        "tag": "core_action",
+        "connection_id": null,
+        "connection_name": null,
+        "use_connection_name": false,
+        "integration_id": null,
+        "data": {
+          "name": "Build S1 Search Queries",
+          "action_type": "variable",
+          "variables": [
+            {
+              "name": "pq_failed",
+              "value": "class_uid=4002 dataSource.cloudflare_dataset='HTTP Requests' src_endpoint.ip='{{local_var.client_ip}}' | let status = number(unmapped.EdgeResponseStatus) | let uri = lower(http_request.url.url_string) | filter uri contains:anycase(\"/login\") | filter status in (401,403,429) | group failed_logins=count(), distinct_uas=estimate_distinct(http_request.user_agent), distinct_hosts=estimate_distinct(http_request.url.hostname) | limit 1",
+              "should_use_as_output": false,
+              "is_secret": false
+            },
+            {
+              "name": "pq_activity",
+              "value": "class_uid=4002 dataSource.cloudflare_dataset='HTTP Requests' src_endpoint.ip='{{local_var.client_ip}}' | let status = number(unmapped.EdgeResponseStatus) | let uri = lower(http_request.url.url_string) | let is_login_ok = (uri contains:anycase(\"/login\")) AND (status in (200,302)) | group total_requests=count(), distinct_hosts=estimate_distinct(http_request.url.hostname), distinct_paths=estimate_distinct(http_request.url.path), login_successes=count(is_login_ok) | limit 1",
+              "should_use_as_output": false,
+              "is_secret": false
+            }
+          ],
+          "variables_scope": "local"
+        },
+        "state": "active",
+        "description": "Two independent PowerQuery bodies (they reference client_ip from the previous action, not each other, so a single Variable action is safe). pq_failed recomputes the attack volume authoritatively for this IP; pq_activity looks for a SUCCESSFUL login from the same attacking IP (login_successes>=1 = account-takeover foothold) plus cross-surface blast radius.",
+        "client_data": { "position": { "x": 0, "y": 531 }, "dimensions": { "width": 256, "height": 76 }, "collapsed": false },
+        "snippet_workflow_id": null,
+        "snippet_version_id": null
+      },
+      "export_id": 27,
+      "connected_to": [{ "target": 26, "custom_handle": null }],
+      "parent_action": null
+    },
+    {
+      "action": {
+        "type": "http_request",
+        "tag": "integration",
+        "connection_id": null,
+        "connection_name": "",
+        "use_connection_name": false,
+        "integration_id": null,
+        "data": {
+          "name": "S1 Auth Failure Recompute",
+          "action_type": "http_request",
+          "public_action_id": null,
+          "method": "post",
+          "url": "{{Connection.protocol}}{{Connection.url}}/sdl/api/powerQuery",
+          "url_path": null,
+          "url_prefix": null,
+          "payload": "{\n  \"query\": \"{{local_var.pq_failed}}\",\n  \"startTime\": \"24h\",\n  \"endTime\": \"0h\"\n}",
+          "parameters": [],
+          "retry_on_status_code": null,
+          "retry_on_status_codes": [500],
+          "ssl_verification": true,
+          "timeout": 60,
+          "headers": { "Content-Type": "application/json", "accept": "application/json" },
+          "use_authentication_data": true,
+          "use_proxy": false,
+          "redirect_follow": true,
+          "continue_on_fail": true,
+          "body_type": null
+        },
+        "state": "active",
+        "description": "S1 SDL search (a): recompute failed_logins + distinct_uas for the attacking IP over 24h. REQUIRES the 'SentinelOne SDL' (Bearer) connection, NOT the ApiToken 'SentinelOne' connection. continue_on_fail so a parse miss can't break the decision (AbuseIPDB is the primary gate).",
+        "client_data": { "position": { "x": 0, "y": 708 }, "dimensions": { "width": 256, "height": 76 }, "collapsed": false },
+        "snippet_workflow_id": null,
+        "snippet_version_id": null
+      },
+      "export_id": 26,
+      "connected_to": [{ "target": 25, "custom_handle": null }],
+      "parent_action": null
+    },
+    {
+      "action": {
+        "type": "http_request",
+        "tag": "integration",
+        "connection_id": null,
+        "connection_name": "",
+        "use_connection_name": false,
+        "integration_id": null,
+        "data": {
+          "name": "S1 Cross-Surface Activity",
+          "action_type": "http_request",
+          "public_action_id": null,
+          "method": "post",
+          "url": "{{Connection.protocol}}{{Connection.url}}/sdl/api/powerQuery",
+          "url_path": null,
+          "url_prefix": null,
+          "payload": "{\n  \"query\": \"{{local_var.pq_activity}}\",\n  \"startTime\": \"24h\",\n  \"endTime\": \"0h\"\n}",
+          "parameters": [],
+          "retry_on_status_code": null,
+          "retry_on_status_codes": [500],
+          "ssl_verification": true,
+          "timeout": 60,
+          "headers": { "Content-Type": "application/json", "accept": "application/json" },
+          "use_authentication_data": true,
+          "use_proxy": false,
+          "redirect_follow": true,
+          "continue_on_fail": true,
+          "body_type": null
+        },
+        "state": "active",
+        "description": "S1 SDL search (b): account-takeover blast radius for the same IP — did any login SUCCEED (login_successes), and how many hosts/paths did the IP touch. login_successes>=1 is the strongest single 'foothold' signal and forces the contain branch. Same 'SentinelOne SDL' (Bearer) connection.",
+        "client_data": { "position": { "x": 0, "y": 885 }, "dimensions": { "width": 256, "height": 76 }, "collapsed": false },
+        "snippet_workflow_id": null,
+        "snippet_version_id": null
+      },
+      "export_id": 25,
+      "connected_to": [{ "target": 24, "custom_handle": null }],
+      "parent_action": null
+    },
+    {
+      "action": {
+        "type": "http_request",
+        "tag": "core_action",
+        "connection_id": null,
+        "connection_name": null,
+        "use_connection_name": false,
+        "integration_id": null,
+        "data": {
+          "name": "AbuseIPDB IP Reputation",
+          "action_type": "http_request",
+          "public_action_id": null,
+          "method": "get",
+          "url": "https://api.abuseipdb.com/api/v2/check",
+          "url_path": null,
+          "url_prefix": null,
+          "payload": null,
+          "parameters": [
+            { "key": "ipAddress", "value": "{{local_var.client_ip}}" },
+            { "key": "maxAgeInDays", "value": "90" }
+          ],
+          "retry_on_status_code": null,
+          "retry_on_status_codes": [500],
+          "ssl_verification": true,
+          "timeout": 30,
+          "headers": { "Accept": "application/json", "Key": "<ABUSEIPDB_API_KEY>" },
+          "use_authentication_data": false,
+          "use_proxy": false,
+          "redirect_follow": true,
+          "continue_on_fail": true,
+          "body_type": null
+        },
+        "state": "active",
+        "description": "Independent threat-intel verdict for the attacking IP (free AbuseIPDB, per building-blocks-catalog A12/B9). abuseConfidenceScore is the destructive-block gate. Replace <ABUSEIPDB_API_KEY> with a real key (or store it as a secret Variable and reference it). VirusTotal /api/v3/ip_addresses/{ip} is an equivalent drop-in.",
+        "client_data": { "position": { "x": 0, "y": 1062 }, "dimensions": { "width": 256, "height": 76 }, "collapsed": false },
+        "snippet_workflow_id": null,
+        "snippet_version_id": null
+      },
+      "export_id": 24,
+      "connected_to": [{ "target": 23, "custom_handle": null }],
+      "parent_action": null
+    },
+    {
+      "action": {
+        "type": "condition",
+        "tag": "core_action",
+        "connection_id": null,
+        "connection_name": null,
+        "use_connection_name": false,
+        "integration_id": null,
+        "data": {
+          "name": "Malicious or High-Risk Src IP",
+          "action_type": "condition",
+          "condition_type": "multi",
+          "condition": null,
+          "conditions": [
+            { "input_value": "{{abuseipdb-ip-reputation.body.data.abuseConfidenceScore}}", "compared_value": "50", "comparison_operator": "greater_than_or_equals" },
+            { "input_value": "{{s1-auth-failure-recompute.body.data.values[0][0]}}", "compared_value": "20", "comparison_operator": "greater_than_or_equals" },
+            { "input_value": "{{s1-cross-surface-activity.body.data.values[0][3]}}", "compared_value": "1", "comparison_operator": "greater_than_or_equals" }
+          ],
+          "conditions_relationship": "or"
+        },
+        "state": "active",
+        "description": "Contain gate (OR): AbuseIPDB malicious (>=50) OR recomputed failed_logins >=20 OR a login already SUCCEEDED from this IP (foothold). TRUE -> hard contain. FALSE -> managed challenge + monitor. The values[0][*] paths track the pq_failed/pq_activity group column order and are response-shape dependent; the AbuseIPDB clause is the reliable primary.",
+        "client_data": { "position": { "x": 0, "y": 1239 }, "dimensions": { "width": 256, "height": 76 }, "collapsed": false },
+        "snippet_workflow_id": null,
+        "snippet_version_id": null
+      },
+      "export_id": 23,
+      "connected_to": [
+        { "target": 22, "custom_handle": "true" },
+        { "target": 13, "custom_handle": "false" }
+      ],
+      "parent_action": null
+    },
+    {
+      "action": {
+        "type": "http_request",
+        "tag": "integration",
+        "connection_id": null,
+        "connection_name": "",
+        "use_connection_name": false,
+        "integration_id": null,
+        "data": {
+          "name": "Create IP Access Rule Block",
+          "action_type": "http_request",
+          "public_action_id": "cloudflare-create-ip-access-rule",
+          "method": "post",
+          "url": "{{Connection.protocol}}{{Connection.url}}/client/v4/zones/{{Connection.zone_id}}/firewall/access_rules/rules",
+          "url_path": null,
+          "url_prefix": null,
+          "payload": "{\n  \"mode\": \"block\",\n  \"configuration\": { \"target\": \"ip\", \"value\": \"{{local_var.client_ip}}\" },\n  \"notes\": \"NovaMind cred-stuffing auto-block (portal.novamind.ai) - alert {{singularity-response-trigger.data.id}}\"\n}",
+          "parameters": [],
+          "retry_on_status_code": null,
+          "retry_on_status_codes": [500],
+          "ssl_verification": true,
+          "timeout": 30,
+          "headers": { "Content-Type": "application/json", "accept": "application/json" },
+          "use_authentication_data": true,
+          "use_proxy": false,
+          "redirect_follow": true,
+          "continue_on_fail": false,
+          "body_type": null
+        },
+        "state": "active",
+        "description": "CONTAIN: block the attacking IP at the Cloudflare zone fronting portal.novamind.ai.",
+        "client_data": { "position": { "x": -200, "y": 1416 }, "dimensions": { "width": 256, "height": 76 }, "collapsed": false },
+        "snippet_workflow_id": null,
+        "snippet_version_id": null
+      },
+      "export_id": 22,
+      "connected_to": [{ "target": 21, "custom_handle": null }],
+      "parent_action": null
+    },
+    {
+      "action": {
+        "type": "http_request",
+        "tag": "integration",
+        "connection_id": null,
+        "connection_name": "",
+        "use_connection_name": false,
+        "integration_id": null,
+        "data": {
+          "name": "Escalate Portal Zone Under Attack",
+          "action_type": "http_request",
+          "public_action_id": "cloudflare-edit-zone-setting",
+          "method": "patch",
+          "url": "{{Connection.protocol}}{{Connection.url}}/client/v4/zones/{{Connection.zone_id}}/settings/security_level",
+          "url_path": null,
+          "url_prefix": null,
+          "payload": "{\n  \"value\": \"under_attack\"\n}",
+          "parameters": [],
+          "retry_on_status_code": null,
+          "retry_on_status_codes": [500],
+          "ssl_verification": true,
+          "timeout": 30,
+          "headers": { "Content-Type": "application/json", "accept": "application/json" },
+          "use_authentication_data": true,
+          "use_proxy": false,
+          "redirect_follow": true,
+          "continue_on_fail": true,
+          "body_type": null
+        },
+        "state": "active",
+        "description": "CONTAIN step-up: raise the portal zone security level to 'Under Attack' so every visitor to portal.novamind.ai gets a JS interstitial challenge. This is the zone-wide step-up substitute for a per-user Access session revoke (not feasible here — see README: the HTTP Requests feed carries no UserEmail). continue_on_fail so a settings error can't block the IOC/note.",
+        "client_data": { "position": { "x": -200, "y": 1593 }, "dimensions": { "width": 256, "height": 76 }, "collapsed": false },
+        "snippet_workflow_id": null,
+        "snippet_version_id": null
+      },
+      "export_id": 21,
+      "connected_to": [{ "target": 20, "custom_handle": null }],
+      "parent_action": null
+    },
+    {
+      "action": {
+        "type": "http_request",
+        "tag": "integration",
+        "connection_id": null,
+        "connection_name": "",
+        "use_connection_name": false,
+        "integration_id": null,
+        "data": {
+          "name": "Add IOC for Attacker IP",
+          "action_type": "http_request",
+          "public_action_id": "sentinelone-create-ioc",
+          "method": "post",
+          "url": "{{Connection.protocol}}{{Connection.url}}/web/api/v2.1/threat-intelligence/iocs",
+          "url_path": null,
+          "url_prefix": null,
+          "payload": "{\n  \"data\": [{\n    \"type\": \"IPV4\",\n    \"value\": \"{{local_var.client_ip}}\",\n    \"method\": \"EQUALS\",\n    \"source\": \"NovaMind Hyperautomation\",\n    \"name\": \"Credential-stuffing / brute-force source (portal.novamind.ai)\",\n    \"description\": \"Auto-added from CF-Access-CredStuffing alert {{singularity-response-trigger.data.id}}. AbuseIPDB confidence {{abuseipdb-ip-reputation.body.data.abuseConfidenceScore}}.\",\n    \"category\": \"credentials\",\n    \"externalId\": \"NovaMind-CredStuffing\",\n    \"originalRiskScore\": \"80\",\n    \"creationTime\": \"{{Function.DATETIME_NOW()}}\",\n    \"validUntil\": \"{{Function.DELTA_NOW(-168)}}\"\n  }],\n  \"filter\": { \"accountIds\": [\"{{singularity-response-trigger.data.scopeId}}\"] }\n}",
+          "parameters": [],
+          "retry_on_status_code": null,
+          "retry_on_status_codes": [500],
+          "ssl_verification": true,
+          "timeout": 30,
+          "headers": { "Content-Type": "application/json", "accept": "application/json" },
+          "use_authentication_data": true,
+          "use_proxy": false,
+          "redirect_follow": false,
+          "continue_on_fail": true,
+          "body_type": null
+        },
+        "state": "active",
+        "description": "CONTAIN: create an S1 IPV4 threat-intelligence IOC for the attacking IP (validUntil = 7 days forward). Uses the ApiToken 'SentinelOne' connection.",
+        "client_data": { "position": { "x": -200, "y": 1770 }, "dimensions": { "width": 256, "height": 76 }, "collapsed": false },
+        "snippet_workflow_id": null,
+        "snippet_version_id": null
+      },
+      "export_id": 20,
+      "connected_to": [{ "target": 19, "custom_handle": null }],
+      "parent_action": null
+    },
+    {
+      "action": {
+        "type": "variable",
+        "tag": "core_action",
+        "connection_id": null,
+        "connection_name": null,
+        "use_connection_name": false,
+        "integration_id": null,
+        "data": {
+          "name": "Containment Note Body",
+          "action_type": "variable",
+          "variables": [
+            {
+              "name": "note_contain",
+              "value": "CONTAINED credential attack on portal.novamind.ai. src_ip {{local_var.client_ip}} | AbuseIPDB confidence {{abuseipdb-ip-reputation.body.data.abuseConfidenceScore}} ({{abuseipdb-ip-reputation.body.data.countryCode}}, {{abuseipdb-ip-reputation.body.data.totalReports}} reports) | recomputed failed_logins {{s1-auth-failure-recompute.body.data.values[0][0]}}, distinct User-Agents {{s1-auth-failure-recompute.body.data.values[0][1]}} (many UAs from one IP = credential-stuffing tooling; few = brute force) | login_successes from this IP {{s1-cross-surface-activity.body.data.values[0][3]}} (>=1 indicates a likely account-takeover foothold). Actions: Cloudflare IP Access block + portal zone set to Under Attack + S1 IPV4 IOC created. Impossible-travel: N/A in this feed (single-host lab, HTTP Requests dataset carries no per-user geo pairing). Verdict SUSPICIOUS pending analyst confirmation - escalate to TRUE_POSITIVE only with independent multi-source confirmation.",
+              "should_use_as_output": false,
+              "is_secret": false
+            }
+          ],
+          "variables_scope": "local"
+        },
+        "state": "active",
+        "description": "Human-readable containment summary assembled from the alert, S1 SDL searches, and AbuseIPDB. Consumed by the Add-Note action (HTML-encoded there).",
+        "client_data": { "position": { "x": -200, "y": 1947 }, "dimensions": { "width": 256, "height": 76 }, "collapsed": false },
+        "snippet_workflow_id": null,
+        "snippet_version_id": null
+      },
+      "export_id": 19,
+      "connected_to": [{ "target": 18, "custom_handle": null }],
+      "parent_action": null
+    },
+    {
+      "action": {
+        "type": "http_request",
+        "tag": "integration",
+        "connection_id": null,
+        "connection_name": "",
+        "use_connection_name": false,
+        "integration_id": null,
+        "data": {
+          "name": "Add Containment Note to Alert",
+          "action_type": "http_request",
+          "public_action_id": null,
+          "method": "post",
+          "url": "{{Connection.protocol}}{{Connection.url}}/web/api/v2.1/unifiedalerts/graphql",
+          "url_path": null,
+          "url_prefix": null,
+          "payload": "{\n  \"query\": \"mutation AddAlertNote { addAlertNote(text: \\\"{{Function.HTML_ENCODE(local_var.note_contain)}}\\\", alertId: \\\"{{singularity-response-trigger.data.id}}\\\") { data { alertId } } }\"\n}",
+          "parameters": [],
+          "retry_on_status_code": null,
+          "retry_on_status_codes": [500],
+          "ssl_verification": true,
+          "timeout": 30,
+          "headers": { "Content-Type": "application/json" },
+          "use_authentication_data": true,
+          "use_proxy": false,
+          "redirect_follow": false,
+          "continue_on_fail": true,
+          "body_type": null
+        },
+        "state": "active",
+        "description": "CONTAIN: annotate the unified alert with the containment summary (UAM GraphQL addAlertNote, B6 modern flavor). ApiToken 'SentinelOne' connection.",
+        "client_data": { "position": { "x": -200, "y": 2124 }, "dimensions": { "width": 256, "height": 76 }, "collapsed": false },
+        "snippet_workflow_id": null,
+        "snippet_version_id": null
+      },
+      "export_id": 18,
+      "connected_to": [{ "target": 17, "custom_handle": null }],
+      "parent_action": null
+    },
+    {
+      "action": {
+        "type": "http_request",
+        "tag": "integration",
+        "connection_id": null,
+        "connection_name": "",
+        "use_connection_name": false,
+        "integration_id": null,
+        "data": {
+          "name": "Raise Alert Confidence",
+          "action_type": "http_request",
+          "public_action_id": null,
+          "method": "post",
+          "url": "{{Connection.protocol}}{{Connection.url}}/web/api/v2.1/unifiedalerts/graphql",
+          "url_path": null,
+          "url_prefix": null,
+          "payload": "{\n  \"query\": \"mutation SetVerdict { alertTriggerActions(actions: [{ id: \\\"S1/alert/setAnalystVerdict\\\", payload: { analystVerdict: { value: \\\"SUSPICIOUS\\\" } } }], filter: { or: [{ and: [{ fieldId: \\\"id\\\", stringEqual: { value: \\\"{{singularity-response-trigger.data.id}}\\\" } }] }] }) { ... on ActionsTriggered { actions { actionId } } } }\"\n}",
+          "parameters": [],
+          "retry_on_status_code": null,
+          "retry_on_status_codes": [500],
+          "ssl_verification": true,
+          "timeout": 30,
+          "headers": { "Content-Type": "application/json" },
+          "use_authentication_data": true,
+          "use_proxy": false,
+          "redirect_follow": false,
+          "continue_on_fail": true,
+          "body_type": null
+        },
+        "state": "active",
+        "description": "CONTAIN: raise the alert analyst verdict to SUSPICIOUS (capped by automation per evidence discipline - no TRUE_POSITIVE without independent multi-source/TI confirmation, which the analyst applies). The exact setAnalystVerdict mutation id/enum is tenant/version dependent - verify against the console's unifiedalerts schema before relying on it; continue_on_fail keeps the flow intact if it differs.",
+        "client_data": { "position": { "x": -200, "y": 2301 }, "dimensions": { "width": 256, "height": 76 }, "collapsed": false },
+        "snippet_workflow_id": null,
+        "snippet_version_id": null
+      },
+      "export_id": 17,
+      "connected_to": [{ "target": 16, "custom_handle": null }],
+      "parent_action": null
+    },
+    {
+      "action": {
+        "type": "http_request",
+        "tag": "integration",
+        "connection_id": null,
+        "connection_name": "",
+        "use_connection_name": false,
+        "integration_id": null,
+        "data": {
+          "name": "Notify SOC Slack Contain",
+          "action_type": "http_request",
+          "public_action_id": "slack-post-message",
+          "method": "post",
+          "url": "https://slack.com/api/chat.postMessage",
+          "url_path": null,
+          "url_prefix": null,
+          "payload": "{\n  \"channel\": \"#novamind-soc\",\n  \"text\": \"CONTAINED credential attack on portal.novamind.ai: blocked src_ip {{local_var.client_ip}} at Cloudflare, portal zone -> Under Attack, S1 IPV4 IOC added. AbuseIPDB {{abuseipdb-ip-reputation.body.data.abuseConfidenceScore}}, login_successes {{s1-cross-surface-activity.body.data.values[0][3]}}. Alert {{singularity-response-trigger.data.id}} ({{singularity-response-trigger.data.name}}). Verdict SUSPICIOUS - analyst confirm.\"\n}",
+          "parameters": [],
+          "retry_on_status_code": null,
+          "retry_on_status_codes": [500],
+          "ssl_verification": true,
+          "timeout": 30,
+          "headers": { "Content-Type": "application/json" },
+          "use_authentication_data": true,
+          "use_proxy": false,
+          "redirect_follow": true,
+          "continue_on_fail": true,
+          "body_type": null
+        },
+        "state": "active",
+        "description": "CONTAIN: post the containment summary to the SOC Slack channel.",
+        "client_data": { "position": { "x": -200, "y": 2478 }, "dimensions": { "width": 256, "height": 76 }, "collapsed": false },
+        "snippet_workflow_id": null,
+        "snippet_version_id": null
+      },
+      "export_id": 16,
+      "connected_to": [{ "target": 15, "custom_handle": null }],
+      "parent_action": null
+    },
+    {
+      "action": {
+        "type": "send_email",
+        "tag": "core_action",
+        "connection_id": null,
+        "connection_name": null,
+        "use_connection_name": false,
+        "integration_id": null,
+        "data": {
+          "name": "Send SOC Email Contain",
+          "action_type": "send_email",
+          "subject": "[NovaMind] Credential attack CONTAINED - {{singularity-response-trigger.data.name}}",
+          "to": ["soc@novamind.ai"],
+          "cc": [],
+          "bcc": [],
+          "reply_to": [],
+          "mime_type": "text/html",
+          "body": "<!DOCTYPE html><html><body><h3>NovaMind Credential-Attack Response - CONTAINED</h3><p>Detection: {{singularity-response-trigger.data.name}} (alert {{singularity-response-trigger.data.id}})</p><ul><li>Attacking src_ip: {{local_var.client_ip}}</li><li>AbuseIPDB confidence: {{abuseipdb-ip-reputation.body.data.abuseConfidenceScore}}</li><li>Recomputed failed_logins: {{s1-auth-failure-recompute.body.data.values[0][0]}} | distinct User-Agents: {{s1-auth-failure-recompute.body.data.values[0][1]}}</li><li>Successful logins from this IP: {{s1-cross-surface-activity.body.data.values[0][3]}}</li><li>Cloudflare IP Access block applied + portal zone set to Under Attack</li><li>S1 IPV4 IOC created</li><li>Verdict: SUSPICIOUS (analyst confirmation required)</li></ul></body></html>",
+          "attachments": [],
+          "continue_on_fail": true
+        },
+        "state": "active",
+        "description": "CONTAIN: email the SOC distribution list the containment receipt. Terminal node of the contain branch.",
+        "client_data": { "position": { "x": -200, "y": 2655 }, "dimensions": { "width": 256, "height": 76 }, "collapsed": false },
+        "snippet_workflow_id": null,
+        "snippet_version_id": null
+      },
+      "export_id": 15,
+      "connected_to": [],
+      "parent_action": null
+    },
+    {
+      "action": {
+        "type": "http_request",
+        "tag": "integration",
+        "connection_id": null,
+        "connection_name": "",
+        "use_connection_name": false,
+        "integration_id": null,
+        "data": {
+          "name": "Create IP Access Rule Challenge",
+          "action_type": "http_request",
+          "public_action_id": "cloudflare-create-ip-access-rule",
+          "method": "post",
+          "url": "{{Connection.protocol}}{{Connection.url}}/client/v4/zones/{{Connection.zone_id}}/firewall/access_rules/rules",
+          "url_path": null,
+          "url_prefix": null,
+          "payload": "{\n  \"mode\": \"managed_challenge\",\n  \"configuration\": { \"target\": \"ip\", \"value\": \"{{local_var.client_ip}}\" },\n  \"notes\": \"NovaMind cred-stuffing step-up challenge (portal.novamind.ai) - alert {{singularity-response-trigger.data.id}}\"\n}",
+          "parameters": [],
+          "retry_on_status_code": null,
+          "retry_on_status_codes": [500],
+          "ssl_verification": true,
+          "timeout": 30,
+          "headers": { "Content-Type": "application/json", "accept": "application/json" },
+          "use_authentication_data": true,
+          "use_proxy": false,
+          "redirect_follow": true,
+          "continue_on_fail": false,
+          "body_type": null
+        },
+        "state": "active",
+        "description": "CHALLENGE (lower-risk): the alert already proves >=10 failed logins, but the IP is not reputationally malicious and no foothold was found - apply a managed challenge (step-up) rather than a hard block, so a false-positive source (broken client, uptime monitor) can still solve the challenge and proceed.",
+        "client_data": { "position": { "x": 200, "y": 1416 }, "dimensions": { "width": 256, "height": 76 }, "collapsed": false },
+        "snippet_workflow_id": null,
+        "snippet_version_id": null
+      },
+      "export_id": 13,
+      "connected_to": [{ "target": 12, "custom_handle": null }],
+      "parent_action": null
+    },
+    {
+      "action": {
+        "type": "variable",
+        "tag": "core_action",
+        "connection_id": null,
+        "connection_name": null,
+        "use_connection_name": false,
+        "integration_id": null,
+        "data": {
+          "name": "Challenge Note Body",
+          "action_type": "variable",
+          "variables": [
+            {
+              "name": "note_challenge",
+              "value": "STEP-UP CHALLENGE applied for credential attack on portal.novamind.ai. src_ip {{local_var.client_ip}} | AbuseIPDB confidence {{abuseipdb-ip-reputation.body.data.abuseConfidenceScore}} (below malicious threshold) | recomputed failed_logins {{s1-auth-failure-recompute.body.data.values[0][0]}}, distinct User-Agents {{s1-auth-failure-recompute.body.data.values[0][1]}} | login_successes {{s1-cross-surface-activity.body.data.values[0][3]}}. Applied Cloudflare managed_challenge (not a hard block) - no independent malicious verdict and no successful-login foothold. Verdict SUSPICIOUS - monitor; re-fire will re-evaluate for hard block.",
+              "should_use_as_output": false,
+              "is_secret": false
+            }
+          ],
+          "variables_scope": "local"
+        },
+        "state": "active",
+        "description": "Monitor-path note body assembled from enrichment. Consumed by the challenge-branch Add-Note action.",
+        "client_data": { "position": { "x": 200, "y": 1593 }, "dimensions": { "width": 256, "height": 76 }, "collapsed": false },
+        "snippet_workflow_id": null,
+        "snippet_version_id": null
+      },
+      "export_id": 12,
+      "connected_to": [{ "target": 11, "custom_handle": null }],
+      "parent_action": null
+    },
+    {
+      "action": {
+        "type": "http_request",
+        "tag": "integration",
+        "connection_id": null,
+        "connection_name": "",
+        "use_connection_name": false,
+        "integration_id": null,
+        "data": {
+          "name": "Add Challenge Note to Alert",
+          "action_type": "http_request",
+          "public_action_id": null,
+          "method": "post",
+          "url": "{{Connection.protocol}}{{Connection.url}}/web/api/v2.1/unifiedalerts/graphql",
+          "url_path": null,
+          "url_prefix": null,
+          "payload": "{\n  \"query\": \"mutation AddAlertNote { addAlertNote(text: \\\"{{Function.HTML_ENCODE(local_var.note_challenge)}}\\\", alertId: \\\"{{singularity-response-trigger.data.id}}\\\") { data { alertId } } }\"\n}",
+          "parameters": [],
+          "retry_on_status_code": null,
+          "retry_on_status_codes": [500],
+          "ssl_verification": true,
+          "timeout": 30,
+          "headers": { "Content-Type": "application/json" },
+          "use_authentication_data": true,
+          "use_proxy": false,
+          "redirect_follow": false,
+          "continue_on_fail": true,
+          "body_type": null
+        },
+        "state": "active",
+        "description": "CHALLENGE: annotate the alert with the monitor-path summary. ApiToken 'SentinelOne' connection.",
+        "client_data": { "position": { "x": 200, "y": 1770 }, "dimensions": { "width": 256, "height": 76 }, "collapsed": false },
+        "snippet_workflow_id": null,
+        "snippet_version_id": null
+      },
+      "export_id": 11,
+      "connected_to": [{ "target": 10, "custom_handle": null }],
+      "parent_action": null
+    },
+    {
+      "action": {
+        "type": "http_request",
+        "tag": "integration",
+        "connection_id": null,
+        "connection_name": "",
+        "use_connection_name": false,
+        "integration_id": null,
+        "data": {
+          "name": "Notify SOC Slack Challenge",
+          "action_type": "http_request",
+          "public_action_id": "slack-post-message",
+          "method": "post",
+          "url": "https://slack.com/api/chat.postMessage",
+          "url_path": null,
+          "url_prefix": null,
+          "payload": "{\n  \"channel\": \"#novamind-soc\",\n  \"text\": \"Credential attack on portal.novamind.ai - STEP-UP CHALLENGE applied to src_ip {{local_var.client_ip}} (AbuseIPDB {{abuseipdb-ip-reputation.body.data.abuseConfidenceScore}}, no foothold). Monitoring. Alert {{singularity-response-trigger.data.id}} ({{singularity-response-trigger.data.name}}).\"\n}",
+          "parameters": [],
+          "retry_on_status_code": null,
+          "retry_on_status_codes": [500],
+          "ssl_verification": true,
+          "timeout": 30,
+          "headers": { "Content-Type": "application/json" },
+          "use_authentication_data": true,
+          "use_proxy": false,
+          "redirect_follow": true,
+          "continue_on_fail": true,
+          "body_type": null
+        },
+        "state": "active",
+        "description": "CHALLENGE: notify SOC Slack of the lower-risk step-up. Terminal node of the challenge branch.",
+        "client_data": { "position": { "x": 200, "y": 1947 }, "dimensions": { "width": 256, "height": 76 }, "collapsed": false },
+        "snippet_workflow_id": null,
+        "snippet_version_id": null
+      },
+      "export_id": 10,
+      "connected_to": [],
+      "parent_action": null
+    },
+    {
+      "action": {
+        "type": "variable",
+        "tag": "core_action",
+        "connection_id": null,
+        "connection_name": null,
+        "use_connection_name": false,
+        "integration_id": null,
+        "data": {
+          "name": "No Source IP Note Body",
+          "action_type": "variable",
+          "variables": [
+            {
+              "name": "note_noip",
+              "value": "CF-Access-CredStuffing alert {{singularity-response-trigger.data.id}} fired but no src_ip indicator was present on the alert, so no Cloudflare/AbuseIPDB action was taken. Root cause: the deployed rule's entityMappings (src_ip) is a pending feature - run the asset-enrichment solution / enable entityMappings so the src_ip binds as an alert indicator. Analyst: pull src_ip from the alert storyline columns (src_ip, host, failed_logins, distinct_uas) and block manually.",
+              "should_use_as_output": false,
+              "is_secret": false
+            }
+          ],
+          "variables_scope": "local"
+        },
+        "state": "active",
+        "description": "Gap-path note body: explains why no action fired when the alert carries no src_ip indicator (evidence discipline - the empty result is itself a finding).",
+        "client_data": { "position": { "x": 400, "y": 531 }, "dimensions": { "width": 256, "height": 76 }, "collapsed": false },
+        "snippet_workflow_id": null,
+        "snippet_version_id": null
+      },
+      "export_id": 5,
+      "connected_to": [{ "target": 4, "custom_handle": null }],
+      "parent_action": null
+    },
+    {
+      "action": {
+        "type": "http_request",
+        "tag": "integration",
+        "connection_id": null,
+        "connection_name": "",
+        "use_connection_name": false,
+        "integration_id": null,
+        "data": {
+          "name": "Add No Source IP Note to Alert",
+          "action_type": "http_request",
+          "public_action_id": null,
+          "method": "post",
+          "url": "{{Connection.protocol}}{{Connection.url}}/web/api/v2.1/unifiedalerts/graphql",
+          "url_path": null,
+          "url_prefix": null,
+          "payload": "{\n  \"query\": \"mutation AddAlertNote { addAlertNote(text: \\\"{{Function.HTML_ENCODE(local_var.note_noip)}}\\\", alertId: \\\"{{singularity-response-trigger.data.id}}\\\") { data { alertId } } }\"\n}",
+          "parameters": [],
+          "retry_on_status_code": null,
+          "retry_on_status_codes": [500],
+          "ssl_verification": true,
+          "timeout": 30,
+          "headers": { "Content-Type": "application/json" },
+          "use_authentication_data": true,
+          "use_proxy": false,
+          "redirect_follow": false,
+          "continue_on_fail": true,
+          "body_type": null
+        },
+        "state": "active",
+        "description": "Gap path: annotate the alert explaining that no src_ip was available and manual follow-up is needed. Terminal node of the no-IP branch.",
+        "client_data": { "position": { "x": 400, "y": 708 }, "dimensions": { "width": 256, "height": 76 }, "collapsed": false },
+        "snippet_workflow_id": null,
+        "snippet_version_id": null
+      },
+      "export_id": 4,
+      "connected_to": [],
+      "parent_action": null
+    }
+  ]
+}
