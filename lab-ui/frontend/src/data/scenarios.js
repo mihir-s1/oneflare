@@ -425,8 +425,319 @@ THRESHOLD: 20 distinct UserEmail values
     }
   },
   {
-    id: "dns",
+    id: "exfil",
     number: "05",
+    title: "Data Exfiltration via API",
+    shortDescription: "10 authenticated bulk export requests generating 500KB+ responses from the API Worker",
+    category: "Workers",
+    categoryColor: "red",
+    severity: "Critical",
+    cfProduct: "Workers + WAF",
+    target: "api.acmecorp.dev /api/v1/customers/export",
+    detectionRule: "CF-API-BulkExfil",
+    tactic: "Exfiltration",
+    overview: "Data exfiltration via bulk API exports is a common insider threat and attacker post-compromise technique. This scenario authenticates to the API Worker using valid credentials, then rapidly fires 10 requests to the /customers/export endpoint, each returning 500KB+ of synthetic customer data. The volume and response size anomaly triggers the STAR rule.",
+    howItWorks: [
+      "Script authenticates: POST /api/v1/auth/login → receives Bearer token",
+      "Fires 10 rapid GET /api/v1/customers/export requests with Authorization header",
+      "Each response contains 500 synthetic customer records (~500KB per response)",
+      "Total exfil volume: ~5MB in under 30 seconds",
+      "Cloudflare Workers logs capture ClientIP, path, EdgeResponseBytes",
+      "STAR rule fires on 10+ requests to /export with response >100KB from same IP in 120s"
+    ],
+    cfLogs: `{
+  "ClientIP": "9.10.11.12",
+  "ClientRequestPath": "/api/v1/customers/export",
+  "EdgeResponseBytes": 524288,
+  "EdgeResponseStatus": 200,
+  "ClientRequestMethod": "GET",
+  "RayID": "xyz789"
+}`,
+    siemLogic: `event.type = "CloudflareHTTPRequest"
+AND event.ClientRequestPath CONTAINS "/export"
+AND event.EdgeResponseBytes > 100000
+THRESHOLD: 10 matching events from same ClientIP
+  in 120 seconds`,
+    siemSeverity: "Critical",
+    siemTactic: "Exfiltration",
+    responseWorkflow: [
+      { step: 1, action: "Get IP Overview", detail: "Enrich — is this a known corporate IP or external threat?" },
+      { step: 2, action: "Create Firewall Rules", detail: "Block requests to /export matching ClientIP immediately" },
+      { step: 3, action: "Create IP Access Rule", detail: "IP-level block across all zones" },
+      { step: 4, action: "List Workers", detail: "Check for rogue Workers deployed at API route" },
+      { step: 5, action: "Update WAF Rule", detail: "Reduce rate limit threshold on /export routes" },
+      { step: 6, action: "Create PCAP Request", detail: "Capture remaining traffic from ClientIP" },
+      { step: 7, action: "Update Log Retention", detail: "Extend retention for evidence preservation" }
+    ],
+    siem: {
+      ruleName: "CF-API-BulkExfil-Enum",
+      ruleType: "Scheduled detection",
+      queryLang: "PowerQuery 2.0 · SentinelOne SDL",
+      dataSource: "Cloudflare zone HTTP Requests → OCSF HTTP Activity (class_uid 4002)",
+      severity: "Critical",
+      validated: true,
+      validationNote: "Partially live-validated against real api.one-flare.com HTTP Requests (LRQ) — and re-tuned after validation. One source (165.225.36.84) made 16 requests to sensitive endpoints, firing the VOLUME branch (sensitive_hits ≥ 10). Note the initial rule required distinct_paths ≥ 4 for the enumeration branch; live data showed that source hit only 2 distinct paths (/api/v1/customers/export ×8, /api/v1/models ×8), so a pure-enumeration gate did NOT fire — the sensitive_hits ≥ 10 volume branch was added and confirmed to fire (0 other hosts match). The LARGE-RESPONSE branch remains validation-pending: the bulk /export pull returned 401 (auth required) so no >100KB response was produced (max EdgeResponseBytes observed = 348). EdgeResponseBytes is present and numeric-castable — the byte branch fires once an authenticated bulk export succeeds.",
+      importance: "Bulk API export is how both external attackers (post-auth) and malicious insiders exfiltrate the crown jewels — customer PII, model weights, training data. Two behaviors betray it: an abnormal RESPONSE SIZE (megabytes where kilobytes are normal) and rapid ENUMERATION of sensitive endpoints. Either alone is a lead; together they are a strong exfil signal.",
+      whyDetect: [
+        "Response-size anomaly: a /export returning 500KB+ per call, repeated, is the volumetric exfil signature Cloudflare logs natively via EdgeResponseBytes.",
+        "Sensitive-endpoint enumeration: a source sweeping /customers, /models, /training-data, /billing is reconnaissance-then-collection, caught even before a large pull succeeds.",
+        "Two independent branches (bytes OR enumeration) so the rule fires on the recon phase and on the actual pull.",
+        "Per-source aggregation ties the volume/breadth back to one client for a clean investigative pivot.",
+      ],
+      query: `class_uid=4002 dataSource.cloudflare_dataset='HTTP Requests'
+| let bytes  = number(unmapped.EdgeResponseBytes)
+| let status = number(unmapped.EdgeResponseStatus)
+| let uri    = lower(http_request.url.url_string)
+| let src_ip = src_endpoint.ip
+| let host   = http_request.url.hostname
+| let sensitive = uri matches '.*(/export|/download|/customers|/training-data|/users|include_weights|/models|/billing|format=jsonl).*'
+| filter uri matches '.*(/export|/download|/customers|/training-data|/users|include_weights|/models|/billing|format=jsonl).*' OR bytes > 100000
+| group
+    requests       = count(),
+    sensitive_hits = count(sensitive),
+    distinct_paths = estimate_distinct(http_request.url.path),
+    big_resp       = count(bytes > 100000),
+    total_bytes    = sum(bytes),
+    max_bytes      = max(bytes),
+    successes      = count(status = 200),
+    evidence       = max_by(http_request.url.url_string, bytes),
+    ray            = any(metadata.uid),
+    first_seen     = oldest(timestamp),
+    last_seen      = newest(timestamp)
+  by src_ip, host
+| filter big_resp >= 5 OR sensitive_hits >= 10 OR (sensitive_hits >= 6 AND distinct_paths >= 4)
+| let reason = big_resp >= 5 ? 'Bulk data pull (large responses)' : 'Repeated sensitive-endpoint access / enumeration'
+| let detection_time = simpledateformat(last_seen, 'yyyy-MM-dd HH:mm:ss z', 'America/Chicago')
+| sort -total_bytes
+| columns detection_time, src_ip, host, reason, requests, sensitive_hits, distinct_paths, big_resp, max_bytes, total_bytes, successes, evidence, ray, first_seen
+| limit 100`,
+      queryExplained: [
+        { code: "number(unmapped.EdgeResponseBytes)", note: "Client-facing response size, string-typed under unmapped.* — cast before arithmetic. This is the volumetric exfil signal (OriginResponseBytes → http_response.body_length is the origin-side twin)." },
+        { code: "sensitive = url_string matches (/export|/customers|/models|…)", note: "Recon/collection targets — the endpoints that return the crown jewels. Catches the enumeration phase before a large pull lands." },
+        { code: "filter big_resp >= 5 OR sensitive_hits >= 10 OR (sensitive_hits >= 6 AND distinct_paths >= 4)", note: "Three branches: ≥5 large responses (bulk pull), OR ≥10 sensitive requests from one source (validated live — 16 repeated /export+/models pulls), OR a broader sweep (≥6 hits over ≥4 paths). The bare-boolean `sensitive` is only used inside count(); the pre-filter inlines the regex because PowerQuery `filter` rejects a bare boolean let." },
+        { code: "successes = count(status = 200)", note: "How many sensitive requests actually returned data (200) vs were denied (401/403). A high successes count on a bulk pull is the critical escalation trigger." },
+      ],
+      signals: [
+        { signal: "≥ 5 responses over 100KB from one source", catches: "Bulk data exfiltration", why: "Repeated megabyte responses to an API client is abnormal — normal calls are kilobytes." },
+        { signal: "≥ 8 sensitive-endpoint hits over ≥ 4 paths", catches: "Endpoint enumeration / staged collection", why: "Sweeping /customers, /models, /training-data, /billing is deliberate crown-jewel recon." },
+        { signal: "successes (200) on sensitive paths", catches: "Successful exfil vs blocked attempt", why: "Distinguishes a realized breach from a denied probe." },
+      ],
+      mitre: [
+        { id: "T1530", tactic: "Collection", name: "Data from Cloud Storage", url: "https://attack.mitre.org/techniques/T1530/" },
+        { id: "T1119", tactic: "Collection", name: "Automated Collection", url: "https://attack.mitre.org/techniques/T1119/" },
+        { id: "T1567.002", tactic: "Exfiltration", name: "Exfiltration to Cloud Storage", url: "https://attack.mitre.org/techniques/T1567/002/" },
+      ],
+      falsePositive: {
+        finding: "Enumeration branch fired cleanly on the attack source with no other host matching. Anticipated FP class: a legitimate analytics/ETL job or a data-science client that legitimately bulk-pulls exports on a schedule.",
+        rootCause: "Sanctioned batch jobs produce the same large-response / broad-endpoint pattern as exfil.",
+        fix: "Allow-list known ETL service-account IPs / user-agents; optionally require successes > 0 AND off-hours timing to focus on anomalous pulls.",
+      },
+      triage: "SUSPICIOUS — Pending Confirmation. Check successes and total_bytes: a source with many 200s and multi-MB total is a likely realized exfil → escalate. Correlate the src_ip/token to a known service account before blocking (avoid breaking a legit ETL).",
+      recommendedResponse: "Block the source IP, rate-limit /export routes, revoke the API token used, and preserve logs+PCAP. If successes indicate data left, open an incident and notify data-protection. Full steps in the Response Playbook tab.",
+    }
+  },
+  {
+    id: "bot",
+    number: "06",
+    title: "Polymorphic AI Bot / Scraper",
+    shortDescription: "Rogue AI scraper rotates User-Agents while Cloudflare's BotScore flags every request as automated",
+    category: "Bot Management",
+    categoryColor: "cyan",
+    severity: "High",
+    cfProduct: "Cloudflare Bot Management",
+    target: "api.one-flare.com /api/v1/*",
+    detectionRule: "CF-BotMgmt-LowBotScoreScraper",
+    tactic: "Reconnaissance / Automated Collection",
+    overview: "A rogue AI agent scrapes NovaMind and probes for training data and model weights, rotating its User-Agent every request to masquerade as many browsers, SDKs, and crawlers. The rotating UA doesn't fool Cloudflare's Bot Management ML model — it scores nearly every request from the client as automated (BotScore ≤ 29, on Cloudflare's 1–99 scale where lower = more bot-like). JA3/JA4 TLS fingerprinting would corroborate this, but JA4 fields are not emitted in this Cloudflare tenant, so detection here relies on BotScore volume clustering per source instead.",
+    howItWorks: [
+      "Script fires ~30 requests to sensitive API paths (/api/v1/models, /training-data, /users, /billing)",
+      "User-Agent is randomized per request across 16 browser/SDK/agent-framework strings",
+      "Cloudflare Bot Management scores each request independently of the claimed User-Agent",
+      "Nearly every request from the source scores low (BotScore ≤ 29) despite the UA churn",
+      "A high volume of low-BotScore requests from one source against sensitive paths is the detection signal"
+    ],
+    cfLogs: `{
+  "ClientIP": "1.2.3.4",
+  "ClientRequestUserAgent": "LangChain/0.1.0",
+  "BotScore": "12",
+  "ClientRequestPath": "/api/v1/training-data"
+}`,
+    siemLogic: `event.type = "CloudflareHTTPRequest"
+AND number(BotScore) <= 29
+THRESHOLD: >=20 requests from same ClientIP against api.* paths`,
+    siemSeverity: "High",
+    siemTactic: "Reconnaissance / Automated Collection",
+    responseWorkflow: [
+      { step: 1, action: "Get IP Overview", detail: "Enrich ClientIP and ASN — hosting/datacenter ranges corroborate automation" },
+      { step: 2, action: "Create WAF Rule", detail: "Challenge or block requests from the source scoring BotScore ≤ 29" },
+      { step: 3, action: "Enable Bot Fight Mode", detail: "Raise Bot Management enforcement on the api zone" },
+      { step: 4, action: "Notify SOC", detail: "Report the source IP, UA list, min BotScore, and probed endpoints" }
+    ],
+    siem: {
+      ruleName: "CF-BotMgmt-LowBotScoreScraper",
+      ruleType: "Scheduled detection",
+      queryLang: "PowerQuery 2.0 · SentinelOne SDL",
+      dataSource: "Cloudflare zone HTTP Requests + Bot Management → OCSF HTTP Activity (class_uid 4002)",
+      severity: "High",
+      validated: false,
+      validationNote: "BotScore-based — JA4 not emitted in this Cloudflare tenant. Live-verified over a 14-day window: unmapped.JA4, unmapped.ClientRequestJA4, unmapped.JA4Signals, and unmapped.BotTags all returned 0 records (Bot Management's TLS-fingerprint fields are not on this account's log stream), but unmapped.BotScore DOES populate (19,581 of 573,594 Cloudflare HTTP Requests records). The rule below is rewritten against BotScore volume clustering per source and is pending a live-fire validation pass against this scenario's attack script.",
+      importance: "Polymorphic bots defeat User-Agent-based blocking by rotating identities every request. TLS fingerprinting (JA3/JA4) would be the durable identifier since a client's TLS stack can't be faked per-request — but JA4 isn't available in this tenant. Cloudflare's Bot Management ML score (BotScore) is the fallback signal: it scores the underlying client behavior, not the claimed UA, so a scraper rotating User-Agents still scores consistently low.",
+      whyDetect: [
+        "BotScore is Cloudflare's own ML verdict on the request, independent of the User-Agent header the client claims.",
+        "A scraper rotating UAs still gets scored on its actual request behavior — the low score persists across every UA variant.",
+        "Clustering low-BotScore requests per source IP separates a sustained automated client from a one-off borderline score.",
+        "Catches AI/agent-framework scrapers (LangChain/AutoGen/CrewAI UAs) hunting training data and model weights.",
+      ],
+      query: `class_uid=4002 dataSource.cloudflare_dataset='HTTP Requests' unmapped.BotScore=*
+| let bot     = number(unmapped.BotScore)
+| let ua      = http_request.user_agent
+| let src_ip  = src_endpoint.ip
+| let host    = http_request.url.hostname
+| filter bot <= 29
+| group
+    hits         = count(),
+    min_score    = min(bot),
+    distinct_ua  = estimate_distinct(ua),
+    paths        = estimate_distinct(http_request.url.path),
+    ua_sample    = array_agg_distinct(ua),
+    first_seen   = oldest(timestamp),
+    last_seen    = newest(timestamp)
+  by src_ip, host
+| filter hits >= 20
+| let detection_time = simpledateformat(last_seen, 'yyyy-MM-dd HH:mm:ss z', 'America/Chicago')
+| sort -hits
+| columns detection_time, src_ip, host, hits, min_score, distinct_ua, paths, ua_sample, first_seen
+| limit 100`,
+      queryExplained: [
+        { code: "unmapped.BotScore=* (initial filter)", note: "Require a Bot Management score present. It lives under unmapped.* — the parser does not promote it to a top-level OCSF field in this tenant." },
+        { code: "number(unmapped.BotScore)", note: "BotScore is 1–99, STRING-typed in the SDL — cast with number() before comparison." },
+        { code: "filter bot <= 29", note: "Cloudflare's own threshold for 'likely automated' traffic; lower = more bot-like." },
+        { code: "group by src_ip, host", note: "Aggregate low-score traffic per source — a scraper making a sustained run, not a single borderline request." },
+        { code: "filter hits >= 20", note: "Require a cluster of low-score requests so one noisy-but-legitimate hit can't alert." },
+      ],
+      signals: [
+        { signal: "BotScore ≤ 29", catches: "Automated client", why: "Cloudflare's ML flags the request as bot-like regardless of the User-Agent it presents." },
+        { signal: "≥ 20 low-score requests from one source", catches: "Scraping / recon sweep", why: "Volume clustering separates a sustained automated client from an isolated borderline score." },
+        { signal: "Broad distinct path set against api.* sensitive endpoints", catches: "Training-data / model enumeration", why: "Spread across models/training-data/users/billing indicates collection, not a single legitimate integration call." },
+      ],
+      mitre: [
+        { id: "T1595", tactic: "Reconnaissance", name: "Active Scanning", url: "https://attack.mitre.org/techniques/T1595/" },
+        { id: "T1119", tactic: "Collection", name: "Automated Collection", url: "https://attack.mitre.org/techniques/T1119/" },
+        { id: "AML.T0002", tactic: "ATLAS Reconnaissance", name: "Acquire Public AI Artifacts / Model Recon", url: "https://atlas.mitre.org/techniques/AML.T0002" },
+      ],
+      falsePositive: {
+        finding: "Not yet re-validated against this scenario's attack script under the new query. Anticipated FP class: a legitimate high-volume integration or health-check client that Cloudflare's ML happens to score low, or a shared corporate egress IP with mixed legitimate automation (uptime monitors, RSS readers).",
+        rootCause: "BotScore is probabilistic ML, not a hard signature — some legitimate automated clients (monitoring, SDKs) score in the bot-like range.",
+        fix: "The hits ≥ 20 cluster gate absorbs isolated low scores; allow-list known monitoring/SDK source IPs and raise the threshold for hosts that legitimately serve API clients.",
+      },
+      triage: "SUSPICIOUS — Pending Confirmation. Review the probed paths for sensitive targets (models/training-data), check the UA list for AI-agent framework signatures, and enrich the source IP/ASN before enforcement.",
+      recommendedResponse: "Challenge or block the source IP via a WAF rule keyed on BotScore ≤ 29, raise Bot Fight Mode on the api zone, and review what the scraper accessed. Full steps in the Response Playbook tab.",
+    }
+  },
+  {
+    id: "promptinj",
+    number: "07",
+    title: "Prompt Injection / LLM Jailbreak",
+    shortDescription: "Burst of jailbreak/injection payloads POSTed to the Pyxis chat endpoint to leak the system prompt and secrets",
+    category: "AI Security",
+    categoryColor: "pink",
+    severity: "High",
+    cfProduct: "Cloudflare Firewall for AI / AI Gateway",
+    target: "api.one-flare.com /api/v1/chat",
+    detectionRule: "CF-FirewallForAI-PromptInjection",
+    tactic: "AI Attack / LLM Prompt Injection",
+    overview: "The rogue AI agent bombards the customer-facing Pyxis chatbot (/api/v1/chat) with prompt-injection and jailbreak payloads — DAN-style overrides, system-prompt exfiltration, indirect/context injection, and Log4Shell-in-a-prompt — trying to leak the system prompt, secrets, training data, and tenant PII or bypass guardrails.",
+    howItWorks: [
+      "Script POSTs 16 jailbreak/injection payloads to /api/v1/chat, one per request",
+      "Payloads include DAN overrides, system-prompt exfil, ${jndi:...} and template-injection strings",
+      "The injection text lives in the POST body — a forward HTTP proxy does not log it, so the visible signal is POST rate + endpoint",
+      "Cloudflare Firewall for AI / AI Gateway (when enabled) scores each prompt's injection risk",
+      "SentinelOne alerts on high-risk-score bursts, or (fallback) on POST volume to the chat endpoint from one source"
+    ],
+    cfLogs: `{
+  "ClientIP": "1.2.3.4",
+  "ClientRequestMethod": "POST",
+  "ClientRequestPath": "/api/v1/chat",
+  "EdgeResponseStatus": 200,
+  "llm_injection_score": 0.97
+}`,
+    siemLogic: `event.type = "CloudflareHTTPRequest"
+AND method = "POST"
+AND path CONTAINS "/api/v1/chat"
+THRESHOLD: >=10 POSTs from same ClientIP
+  in the window`,
+    siemSeverity: "High",
+    siemTactic: "AI Attack / LLM Prompt Injection",
+    responseWorkflow: [
+      { step: 1, action: "Get IP Overview", detail: "Enrich the source IP of the injection burst" },
+      { step: 2, action: "Create WAF Rule", detail: "Rate-limit or block POSTs to /api/v1/chat from the source" },
+      { step: 3, action: "Enable Firewall for AI", detail: "Turn on prompt-injection scoring / guardrails on the AI Gateway" },
+      { step: 4, action: "Notify SOC", detail: "Report the source, request rate, and endpoint for LLM-abuse review" }
+    ],
+    siem: {
+      ruleName: "CF-FirewallForAI-PromptInjection",
+      ruleType: "Scheduled detection",
+      queryLang: "PowerQuery 2.0 · SentinelOne SDL",
+      dataSource: "Cloudflare zone HTTP Requests (fallback) / Firewall for AI (ideal) → OCSF HTTP Activity (class_uid 4002)",
+      severity: "High",
+      validated: false,
+      validationNote: "VALIDATION-PENDING on two counts. (1) The /api/v1/chat endpoint was not exercised in this seed, so there is no chat POST traffic yet to fire against. (2) The IDEAL signal — Cloudflare Firewall for AI / AI Gateway injection scores — is not present in the feed (no llm_injection_score / prompt-risk field observed under unmapped.*); the injection text itself is in the POST body, which HTTP-request logs do not capture. This rule therefore uses the FALLBACK behavioral signal that IS validatable on the live schema: POST volume to the chat endpoint from one source (method, url_string, src_endpoint.ip all confirmed present). UI wiring for this scenario is also pending.",
+      importance: "Prompt injection is the #1 LLM attack (OWASP LLM01): a crafted prompt overrides the system instructions to leak the system prompt, exfiltrate secrets/PII, or bypass safety guardrails. For a customer-facing chatbot with backend access, a successful jailbreak is a data breach. Even without body inspection, a burst of chat POSTs from one source is an abuse tell worth surfacing.",
+      whyDetect: [
+        "Behavioral fallback that works TODAY on HTTP-request logs — an injection barrage is a POST burst to the chat endpoint from one source.",
+        "No single POST is suspicious; the volume/velocity from one client is the signal, which only aggregation reveals.",
+        "Upgrades cleanly: when Firewall for AI scores are ingested, swap the volume gate for a high-injection-score gate on the same rule shape.",
+        "Covers rogue-agent abuse of the LLM (jailbreak, system-prompt exfil, guardrail bypass) that the app layer may silently serve 200.",
+      ],
+      query: `class_uid=4002 dataSource.cloudflare_dataset='HTTP Requests'
+| let m      = http_request.http_method
+| let uri    = lower(http_request.url.url_string)
+| let status = number(unmapped.EdgeResponseStatus)
+| let src_ip = src_endpoint.ip
+| let host   = http_request.url.hostname
+| filter m = 'POST' AND uri matches '.*/api/v1/chat.*'
+| group
+    posts        = count(),
+    distinct_ua  = estimate_distinct(http_request.user_agent),
+    blocked      = count(status = 403 OR status = 429),
+    served       = count(status = 200),
+    ray          = any(metadata.uid),
+    first_seen   = oldest(timestamp),
+    last_seen    = newest(timestamp)
+  by src_ip, host
+| filter posts >= 10
+| let detection_time = simpledateformat(last_seen, 'yyyy-MM-dd HH:mm:ss z', 'America/Chicago')
+| sort -posts
+| columns detection_time, src_ip, host, posts, distinct_ua, served, blocked, ray, first_seen
+| limit 100`,
+      queryExplained: [
+        { code: "filter m='POST' AND uri matches /api/v1/chat", note: "Isolate chat-completion POSTs to the Pyxis endpoint. The injection payload is in the body (not logged) — endpoint + method is the observable." },
+        { code: "group by src_ip, host", note: "Aggregate per source: an injection barrage is many POSTs from one client in a short window." },
+        { code: "served = count(status=200)", note: "Chat requests the app actually answered — the ones where a jailbreak could have succeeded and returned data." },
+        { code: "filter posts >= 10", note: "Volume gate for the burst. WHEN Firewall for AI scores land, replace this with min(injection_score-equivalent) or count(high-risk prompts)." },
+      ],
+      signals: [
+        { signal: "≥ 10 POSTs to /api/v1/chat from one source", catches: "Prompt-injection / jailbreak barrage", why: "Automated injection fuzzing hammers the endpoint; a real user chats at human pace." },
+        { signal: "served (200) count", catches: "Prompts the LLM answered", why: "Answered injection attempts are where system-prompt / secret leakage could occur." },
+        { signal: "(future) high Firewall-for-AI injection score", catches: "Confirmed injection payloads", why: "Content-based confirmation once AI Gateway scoring is ingested — upgrades this from volumetric to definitive." },
+      ],
+      mitre: [
+        { id: "AML.T0054", tactic: "ATLAS Initial Access", name: "LLM Prompt Injection", url: "https://atlas.mitre.org/techniques/AML.T0054" },
+        { id: "AML.T0057", tactic: "ATLAS Exfiltration", name: "LLM Data Leakage", url: "https://atlas.mitre.org/techniques/AML.T0057" },
+        { id: "T1499", tactic: "Impact", name: "Endpoint Denial of Service (resource abuse)", url: "https://attack.mitre.org/techniques/T1499/" },
+      ],
+      falsePositive: {
+        finding: "Not yet observable (no chat traffic seeded). Anticipated FP class: a power user or a legitimate automated integration (support bot, load test) making many chat calls in a short window.",
+        rootCause: "Volumetric-only detection cannot tell a heavy legitimate user from an attacker without body/score inspection.",
+        fix: "Ingest Firewall for AI injection scores and gate on those instead of raw volume; until then allow-list known integration IPs and tune the posts threshold to the endpoint's normal peak rate.",
+      },
+      triage: "SUSPICIOUS — Pending Confirmation, and LOW-CONFIDENCE without content inspection. Confirm via the app's LLM/guardrail logs (were injection strings present? did any response leak the system prompt?) before escalating. The volumetric alert is a lead, not proof.",
+      recommendedResponse: "Rate-limit /api/v1/chat from the source, enable Cloudflare Firewall for AI scoring/guardrails, and review LLM output logs for leaked system-prompt or secrets. Full steps in the Response Playbook tab.",
+    }
+  },
+  {
+    id: "dns",
+    number: "08",
     title: "DNS Tunneling / C2 Beaconing",
     shortDescription: "30 DNS queries to algorithmically generated subdomains mimicking dnscat2-style C2",
     category: "Gateway",
@@ -540,315 +851,5 @@ THRESHOLD: 10 queries to same root domain
       recommendedResponse: "Sinkhole the C2 zone and block it at the Gateway DNS layer, isolate the source host, and preserve DNS logs + PCAP for forensics. Full steps in the Response Playbook tab.",
     }
   },
-  {
-    id: "exfil",
-    number: "06",
-    title: "Data Exfiltration via API",
-    shortDescription: "10 authenticated bulk export requests generating 500KB+ responses from the API Worker",
-    category: "Workers",
-    categoryColor: "red",
-    severity: "Critical",
-    cfProduct: "Workers + WAF",
-    target: "api.acmecorp.dev /api/v1/customers/export",
-    detectionRule: "CF-API-BulkExfil",
-    tactic: "Exfiltration",
-    overview: "Data exfiltration via bulk API exports is a common insider threat and attacker post-compromise technique. This scenario authenticates to the API Worker using valid credentials, then rapidly fires 10 requests to the /customers/export endpoint, each returning 500KB+ of synthetic customer data. The volume and response size anomaly triggers the STAR rule.",
-    howItWorks: [
-      "Script authenticates: POST /api/v1/auth/login → receives Bearer token",
-      "Fires 10 rapid GET /api/v1/customers/export requests with Authorization header",
-      "Each response contains 500 synthetic customer records (~500KB per response)",
-      "Total exfil volume: ~5MB in under 30 seconds",
-      "Cloudflare Workers logs capture ClientIP, path, EdgeResponseBytes",
-      "STAR rule fires on 10+ requests to /export with response >100KB from same IP in 120s"
-    ],
-    cfLogs: `{
-  "ClientIP": "9.10.11.12",
-  "ClientRequestPath": "/api/v1/customers/export",
-  "EdgeResponseBytes": 524288,
-  "EdgeResponseStatus": 200,
-  "ClientRequestMethod": "GET",
-  "RayID": "xyz789"
-}`,
-    siemLogic: `event.type = "CloudflareHTTPRequest"
-AND event.ClientRequestPath CONTAINS "/export"
-AND event.EdgeResponseBytes > 100000
-THRESHOLD: 10 matching events from same ClientIP
-  in 120 seconds`,
-    siemSeverity: "Critical",
-    siemTactic: "Exfiltration",
-    responseWorkflow: [
-      { step: 1, action: "Get IP Overview", detail: "Enrich — is this a known corporate IP or external threat?" },
-      { step: 2, action: "Create Firewall Rules", detail: "Block requests to /export matching ClientIP immediately" },
-      { step: 3, action: "Create IP Access Rule", detail: "IP-level block across all zones" },
-      { step: 4, action: "List Workers", detail: "Check for rogue Workers deployed at API route" },
-      { step: 5, action: "Update WAF Rule", detail: "Reduce rate limit threshold on /export routes" },
-      { step: 6, action: "Create PCAP Request", detail: "Capture remaining traffic from ClientIP" },
-      { step: 7, action: "Update Log Retention", detail: "Extend retention for evidence preservation" }
-    ],
-    siem: {
-      ruleName: "CF-API-BulkExfil-Enum",
-      ruleType: "Scheduled detection",
-      queryLang: "PowerQuery 2.0 · SentinelOne SDL",
-      dataSource: "Cloudflare zone HTTP Requests → OCSF HTTP Activity (class_uid 4002)",
-      severity: "Critical",
-      validated: true,
-      validationNote: "Partially live-validated against real api.one-flare.com HTTP Requests (LRQ) — and re-tuned after validation. One source (165.225.36.84) made 16 requests to sensitive endpoints, firing the VOLUME branch (sensitive_hits ≥ 10). Note the initial rule required distinct_paths ≥ 4 for the enumeration branch; live data showed that source hit only 2 distinct paths (/api/v1/customers/export ×8, /api/v1/models ×8), so a pure-enumeration gate did NOT fire — the sensitive_hits ≥ 10 volume branch was added and confirmed to fire (0 other hosts match). The LARGE-RESPONSE branch remains validation-pending: the bulk /export pull returned 401 (auth required) so no >100KB response was produced (max EdgeResponseBytes observed = 348). EdgeResponseBytes is present and numeric-castable — the byte branch fires once an authenticated bulk export succeeds.",
-      importance: "Bulk API export is how both external attackers (post-auth) and malicious insiders exfiltrate the crown jewels — customer PII, model weights, training data. Two behaviors betray it: an abnormal RESPONSE SIZE (megabytes where kilobytes are normal) and rapid ENUMERATION of sensitive endpoints. Either alone is a lead; together they are a strong exfil signal.",
-      whyDetect: [
-        "Response-size anomaly: a /export returning 500KB+ per call, repeated, is the volumetric exfil signature Cloudflare logs natively via EdgeResponseBytes.",
-        "Sensitive-endpoint enumeration: a source sweeping /customers, /models, /training-data, /billing is reconnaissance-then-collection, caught even before a large pull succeeds.",
-        "Two independent branches (bytes OR enumeration) so the rule fires on the recon phase and on the actual pull.",
-        "Per-source aggregation ties the volume/breadth back to one client for a clean investigative pivot.",
-      ],
-      query: `class_uid=4002 dataSource.cloudflare_dataset='HTTP Requests'
-| let bytes  = number(unmapped.EdgeResponseBytes)
-| let status = number(unmapped.EdgeResponseStatus)
-| let uri    = lower(http_request.url.url_string)
-| let src_ip = src_endpoint.ip
-| let host   = http_request.url.hostname
-| let sensitive = uri matches '.*(/export|/download|/customers|/training-data|/users|include_weights|/models|/billing|format=jsonl).*'
-| filter uri matches '.*(/export|/download|/customers|/training-data|/users|include_weights|/models|/billing|format=jsonl).*' OR bytes > 100000
-| group
-    requests       = count(),
-    sensitive_hits = count(sensitive),
-    distinct_paths = estimate_distinct(http_request.url.path),
-    big_resp       = count(bytes > 100000),
-    total_bytes    = sum(bytes),
-    max_bytes      = max(bytes),
-    successes      = count(status = 200),
-    evidence       = max_by(http_request.url.url_string, bytes),
-    ray            = any(metadata.uid),
-    first_seen     = oldest(timestamp),
-    last_seen      = newest(timestamp)
-  by src_ip, host
-| filter big_resp >= 5 OR sensitive_hits >= 10 OR (sensitive_hits >= 6 AND distinct_paths >= 4)
-| let reason = big_resp >= 5 ? 'Bulk data pull (large responses)' : 'Repeated sensitive-endpoint access / enumeration'
-| let detection_time = simpledateformat(last_seen, 'yyyy-MM-dd HH:mm:ss z', 'America/Chicago')
-| sort -total_bytes
-| columns detection_time, src_ip, host, reason, requests, sensitive_hits, distinct_paths, big_resp, max_bytes, total_bytes, successes, evidence, ray, first_seen
-| limit 100`,
-      queryExplained: [
-        { code: "number(unmapped.EdgeResponseBytes)", note: "Client-facing response size, string-typed under unmapped.* — cast before arithmetic. This is the volumetric exfil signal (OriginResponseBytes → http_response.body_length is the origin-side twin)." },
-        { code: "sensitive = url_string matches (/export|/customers|/models|…)", note: "Recon/collection targets — the endpoints that return the crown jewels. Catches the enumeration phase before a large pull lands." },
-        { code: "filter big_resp >= 5 OR sensitive_hits >= 10 OR (sensitive_hits >= 6 AND distinct_paths >= 4)", note: "Three branches: ≥5 large responses (bulk pull), OR ≥10 sensitive requests from one source (validated live — 16 repeated /export+/models pulls), OR a broader sweep (≥6 hits over ≥4 paths). The bare-boolean `sensitive` is only used inside count(); the pre-filter inlines the regex because PowerQuery `filter` rejects a bare boolean let." },
-        { code: "successes = count(status = 200)", note: "How many sensitive requests actually returned data (200) vs were denied (401/403). A high successes count on a bulk pull is the critical escalation trigger." },
-      ],
-      signals: [
-        { signal: "≥ 5 responses over 100KB from one source", catches: "Bulk data exfiltration", why: "Repeated megabyte responses to an API client is abnormal — normal calls are kilobytes." },
-        { signal: "≥ 8 sensitive-endpoint hits over ≥ 4 paths", catches: "Endpoint enumeration / staged collection", why: "Sweeping /customers, /models, /training-data, /billing is deliberate crown-jewel recon." },
-        { signal: "successes (200) on sensitive paths", catches: "Successful exfil vs blocked attempt", why: "Distinguishes a realized breach from a denied probe." },
-      ],
-      mitre: [
-        { id: "T1530", tactic: "Collection", name: "Data from Cloud Storage", url: "https://attack.mitre.org/techniques/T1530/" },
-        { id: "T1119", tactic: "Collection", name: "Automated Collection", url: "https://attack.mitre.org/techniques/T1119/" },
-        { id: "T1567.002", tactic: "Exfiltration", name: "Exfiltration to Cloud Storage", url: "https://attack.mitre.org/techniques/T1567/002/" },
-      ],
-      falsePositive: {
-        finding: "Enumeration branch fired cleanly on the attack source with no other host matching. Anticipated FP class: a legitimate analytics/ETL job or a data-science client that legitimately bulk-pulls exports on a schedule.",
-        rootCause: "Sanctioned batch jobs produce the same large-response / broad-endpoint pattern as exfil.",
-        fix: "Allow-list known ETL service-account IPs / user-agents; optionally require successes > 0 AND off-hours timing to focus on anomalous pulls.",
-      },
-      triage: "SUSPICIOUS — Pending Confirmation. Check successes and total_bytes: a source with many 200s and multi-MB total is a likely realized exfil → escalate. Correlate the src_ip/token to a known service account before blocking (avoid breaking a legit ETL).",
-      recommendedResponse: "Block the source IP, rate-limit /export routes, revoke the API token used, and preserve logs+PCAP. If successes indicate data left, open an incident and notify data-protection. Full steps in the Response Playbook tab.",
-    }
-  },
-  {
-    id: "bot",
-    number: "07",
-    title: "Polymorphic AI Bot / Scraper",
-    shortDescription: "Rogue AI scraper rotates User-Agents while Cloudflare's BotScore flags every request as automated",
-    category: "Bot Management",
-    categoryColor: "cyan",
-    severity: "High",
-    cfProduct: "Cloudflare Bot Management",
-    target: "api.one-flare.com /api/v1/*",
-    detectionRule: "CF-BotMgmt-LowBotScoreScraper",
-    tactic: "Reconnaissance / Automated Collection",
-    overview: "A rogue AI agent scrapes NovaMind and probes for training data and model weights, rotating its User-Agent every request to masquerade as many browsers, SDKs, and crawlers. The rotating UA doesn't fool Cloudflare's Bot Management ML model — it scores nearly every request from the client as automated (BotScore ≤ 29, on Cloudflare's 1–99 scale where lower = more bot-like). JA3/JA4 TLS fingerprinting would corroborate this, but JA4 fields are not emitted in this Cloudflare tenant, so detection here relies on BotScore volume clustering per source instead.",
-    howItWorks: [
-      "Script fires ~30 requests to sensitive API paths (/api/v1/models, /training-data, /users, /billing)",
-      "User-Agent is randomized per request across 16 browser/SDK/agent-framework strings",
-      "Cloudflare Bot Management scores each request independently of the claimed User-Agent",
-      "Nearly every request from the source scores low (BotScore ≤ 29) despite the UA churn",
-      "A high volume of low-BotScore requests from one source against sensitive paths is the detection signal"
-    ],
-    cfLogs: `{
-  "ClientIP": "1.2.3.4",
-  "ClientRequestUserAgent": "LangChain/0.1.0",
-  "BotScore": "12",
-  "ClientRequestPath": "/api/v1/training-data"
-}`,
-    siemLogic: `event.type = "CloudflareHTTPRequest"
-AND number(BotScore) <= 29
-THRESHOLD: >=20 requests from same ClientIP against api.* paths`,
-    siemSeverity: "High",
-    siemTactic: "Reconnaissance / Automated Collection",
-    responseWorkflow: [
-      { step: 1, action: "Get IP Overview", detail: "Enrich ClientIP and ASN — hosting/datacenter ranges corroborate automation" },
-      { step: 2, action: "Create WAF Rule", detail: "Challenge or block requests from the source scoring BotScore ≤ 29" },
-      { step: 3, action: "Enable Bot Fight Mode", detail: "Raise Bot Management enforcement on the api zone" },
-      { step: 4, action: "Notify SOC", detail: "Report the source IP, UA list, min BotScore, and probed endpoints" }
-    ],
-    siem: {
-      ruleName: "CF-BotMgmt-LowBotScoreScraper",
-      ruleType: "Scheduled detection",
-      queryLang: "PowerQuery 2.0 · SentinelOne SDL",
-      dataSource: "Cloudflare zone HTTP Requests + Bot Management → OCSF HTTP Activity (class_uid 4002)",
-      severity: "High",
-      validated: false,
-      validationNote: "BotScore-based — JA4 not emitted in this Cloudflare tenant. Live-verified over a 14-day window: unmapped.JA4, unmapped.ClientRequestJA4, unmapped.JA4Signals, and unmapped.BotTags all returned 0 records (Bot Management's TLS-fingerprint fields are not on this account's log stream), but unmapped.BotScore DOES populate (19,581 of 573,594 Cloudflare HTTP Requests records). The rule below is rewritten against BotScore volume clustering per source and is pending a live-fire validation pass against this scenario's attack script.",
-      importance: "Polymorphic bots defeat User-Agent-based blocking by rotating identities every request. TLS fingerprinting (JA3/JA4) would be the durable identifier since a client's TLS stack can't be faked per-request — but JA4 isn't available in this tenant. Cloudflare's Bot Management ML score (BotScore) is the fallback signal: it scores the underlying client behavior, not the claimed UA, so a scraper rotating User-Agents still scores consistently low.",
-      whyDetect: [
-        "BotScore is Cloudflare's own ML verdict on the request, independent of the User-Agent header the client claims.",
-        "A scraper rotating UAs still gets scored on its actual request behavior — the low score persists across every UA variant.",
-        "Clustering low-BotScore requests per source IP separates a sustained automated client from a one-off borderline score.",
-        "Catches AI/agent-framework scrapers (LangChain/AutoGen/CrewAI UAs) hunting training data and model weights.",
-      ],
-      query: `class_uid=4002 dataSource.cloudflare_dataset='HTTP Requests' unmapped.BotScore=*
-| let bot     = number(unmapped.BotScore)
-| let ua      = http_request.user_agent
-| let src_ip  = src_endpoint.ip
-| let host    = http_request.url.hostname
-| filter bot <= 29
-| group
-    hits         = count(),
-    min_score    = min(bot),
-    distinct_ua  = estimate_distinct(ua),
-    paths        = estimate_distinct(http_request.url.path),
-    ua_sample    = array_agg_distinct(ua),
-    first_seen   = oldest(timestamp),
-    last_seen    = newest(timestamp)
-  by src_ip, host
-| filter hits >= 20
-| let detection_time = simpledateformat(last_seen, 'yyyy-MM-dd HH:mm:ss z', 'America/Chicago')
-| sort -hits
-| columns detection_time, src_ip, host, hits, min_score, distinct_ua, paths, ua_sample, first_seen
-| limit 100`,
-      queryExplained: [
-        { code: "unmapped.BotScore=* (initial filter)", note: "Require a Bot Management score present. It lives under unmapped.* — the parser does not promote it to a top-level OCSF field in this tenant." },
-        { code: "number(unmapped.BotScore)", note: "BotScore is 1–99, STRING-typed in the SDL — cast with number() before comparison." },
-        { code: "filter bot <= 29", note: "Cloudflare's own threshold for 'likely automated' traffic; lower = more bot-like." },
-        { code: "group by src_ip, host", note: "Aggregate low-score traffic per source — a scraper making a sustained run, not a single borderline request." },
-        { code: "filter hits >= 20", note: "Require a cluster of low-score requests so one noisy-but-legitimate hit can't alert." },
-      ],
-      signals: [
-        { signal: "BotScore ≤ 29", catches: "Automated client", why: "Cloudflare's ML flags the request as bot-like regardless of the User-Agent it presents." },
-        { signal: "≥ 20 low-score requests from one source", catches: "Scraping / recon sweep", why: "Volume clustering separates a sustained automated client from an isolated borderline score." },
-        { signal: "Broad distinct path set against api.* sensitive endpoints", catches: "Training-data / model enumeration", why: "Spread across models/training-data/users/billing indicates collection, not a single legitimate integration call." },
-      ],
-      mitre: [
-        { id: "T1595", tactic: "Reconnaissance", name: "Active Scanning", url: "https://attack.mitre.org/techniques/T1595/" },
-        { id: "T1119", tactic: "Collection", name: "Automated Collection", url: "https://attack.mitre.org/techniques/T1119/" },
-        { id: "AML.T0002", tactic: "ATLAS Reconnaissance", name: "Acquire Public AI Artifacts / Model Recon", url: "https://atlas.mitre.org/techniques/AML.T0002" },
-      ],
-      falsePositive: {
-        finding: "Not yet re-validated against this scenario's attack script under the new query. Anticipated FP class: a legitimate high-volume integration or health-check client that Cloudflare's ML happens to score low, or a shared corporate egress IP with mixed legitimate automation (uptime monitors, RSS readers).",
-        rootCause: "BotScore is probabilistic ML, not a hard signature — some legitimate automated clients (monitoring, SDKs) score in the bot-like range.",
-        fix: "The hits ≥ 20 cluster gate absorbs isolated low scores; allow-list known monitoring/SDK source IPs and raise the threshold for hosts that legitimately serve API clients.",
-      },
-      triage: "SUSPICIOUS — Pending Confirmation. Review the probed paths for sensitive targets (models/training-data), check the UA list for AI-agent framework signatures, and enrich the source IP/ASN before enforcement.",
-      recommendedResponse: "Challenge or block the source IP via a WAF rule keyed on BotScore ≤ 29, raise Bot Fight Mode on the api zone, and review what the scraper accessed. Full steps in the Response Playbook tab.",
-    }
-  },
-  {
-    id: "promptinj",
-    number: "08",
-    title: "Prompt Injection / LLM Jailbreak",
-    shortDescription: "Burst of jailbreak/injection payloads POSTed to the Pyxis chat endpoint to leak the system prompt and secrets",
-    category: "AI Security",
-    categoryColor: "pink",
-    severity: "High",
-    cfProduct: "Cloudflare Firewall for AI / AI Gateway",
-    target: "api.one-flare.com /api/v1/chat",
-    detectionRule: "CF-FirewallForAI-PromptInjection",
-    tactic: "AI Attack / LLM Prompt Injection",
-    overview: "The rogue AI agent bombards the customer-facing Pyxis chatbot (/api/v1/chat) with prompt-injection and jailbreak payloads — DAN-style overrides, system-prompt exfiltration, indirect/context injection, and Log4Shell-in-a-prompt — trying to leak the system prompt, secrets, training data, and tenant PII or bypass guardrails.",
-    howItWorks: [
-      "Script POSTs 16 jailbreak/injection payloads to /api/v1/chat, one per request",
-      "Payloads include DAN overrides, system-prompt exfil, ${jndi:...} and template-injection strings",
-      "The injection text lives in the POST body — a forward HTTP proxy does not log it, so the visible signal is POST rate + endpoint",
-      "Cloudflare Firewall for AI / AI Gateway (when enabled) scores each prompt's injection risk",
-      "SentinelOne alerts on high-risk-score bursts, or (fallback) on POST volume to the chat endpoint from one source"
-    ],
-    cfLogs: `{
-  "ClientIP": "1.2.3.4",
-  "ClientRequestMethod": "POST",
-  "ClientRequestPath": "/api/v1/chat",
-  "EdgeResponseStatus": 200,
-  "llm_injection_score": 0.97
-}`,
-    siemLogic: `event.type = "CloudflareHTTPRequest"
-AND method = "POST"
-AND path CONTAINS "/api/v1/chat"
-THRESHOLD: >=10 POSTs from same ClientIP
-  in the window`,
-    siemSeverity: "High",
-    siemTactic: "AI Attack / LLM Prompt Injection",
-    responseWorkflow: [
-      { step: 1, action: "Get IP Overview", detail: "Enrich the source IP of the injection burst" },
-      { step: 2, action: "Create WAF Rule", detail: "Rate-limit or block POSTs to /api/v1/chat from the source" },
-      { step: 3, action: "Enable Firewall for AI", detail: "Turn on prompt-injection scoring / guardrails on the AI Gateway" },
-      { step: 4, action: "Notify SOC", detail: "Report the source, request rate, and endpoint for LLM-abuse review" }
-    ],
-    siem: {
-      ruleName: "CF-FirewallForAI-PromptInjection",
-      ruleType: "Scheduled detection",
-      queryLang: "PowerQuery 2.0 · SentinelOne SDL",
-      dataSource: "Cloudflare zone HTTP Requests (fallback) / Firewall for AI (ideal) → OCSF HTTP Activity (class_uid 4002)",
-      severity: "High",
-      validated: false,
-      validationNote: "VALIDATION-PENDING on two counts. (1) The /api/v1/chat endpoint was not exercised in this seed, so there is no chat POST traffic yet to fire against. (2) The IDEAL signal — Cloudflare Firewall for AI / AI Gateway injection scores — is not present in the feed (no llm_injection_score / prompt-risk field observed under unmapped.*); the injection text itself is in the POST body, which HTTP-request logs do not capture. This rule therefore uses the FALLBACK behavioral signal that IS validatable on the live schema: POST volume to the chat endpoint from one source (method, url_string, src_endpoint.ip all confirmed present). UI wiring for this scenario is also pending.",
-      importance: "Prompt injection is the #1 LLM attack (OWASP LLM01): a crafted prompt overrides the system instructions to leak the system prompt, exfiltrate secrets/PII, or bypass safety guardrails. For a customer-facing chatbot with backend access, a successful jailbreak is a data breach. Even without body inspection, a burst of chat POSTs from one source is an abuse tell worth surfacing.",
-      whyDetect: [
-        "Behavioral fallback that works TODAY on HTTP-request logs — an injection barrage is a POST burst to the chat endpoint from one source.",
-        "No single POST is suspicious; the volume/velocity from one client is the signal, which only aggregation reveals.",
-        "Upgrades cleanly: when Firewall for AI scores are ingested, swap the volume gate for a high-injection-score gate on the same rule shape.",
-        "Covers rogue-agent abuse of the LLM (jailbreak, system-prompt exfil, guardrail bypass) that the app layer may silently serve 200.",
-      ],
-      query: `class_uid=4002 dataSource.cloudflare_dataset='HTTP Requests'
-| let m      = http_request.http_method
-| let uri    = lower(http_request.url.url_string)
-| let status = number(unmapped.EdgeResponseStatus)
-| let src_ip = src_endpoint.ip
-| let host   = http_request.url.hostname
-| filter m = 'POST' AND uri matches '.*/api/v1/chat.*'
-| group
-    posts        = count(),
-    distinct_ua  = estimate_distinct(http_request.user_agent),
-    blocked      = count(status = 403 OR status = 429),
-    served       = count(status = 200),
-    ray          = any(metadata.uid),
-    first_seen   = oldest(timestamp),
-    last_seen    = newest(timestamp)
-  by src_ip, host
-| filter posts >= 10
-| let detection_time = simpledateformat(last_seen, 'yyyy-MM-dd HH:mm:ss z', 'America/Chicago')
-| sort -posts
-| columns detection_time, src_ip, host, posts, distinct_ua, served, blocked, ray, first_seen
-| limit 100`,
-      queryExplained: [
-        { code: "filter m='POST' AND uri matches /api/v1/chat", note: "Isolate chat-completion POSTs to the Pyxis endpoint. The injection payload is in the body (not logged) — endpoint + method is the observable." },
-        { code: "group by src_ip, host", note: "Aggregate per source: an injection barrage is many POSTs from one client in a short window." },
-        { code: "served = count(status=200)", note: "Chat requests the app actually answered — the ones where a jailbreak could have succeeded and returned data." },
-        { code: "filter posts >= 10", note: "Volume gate for the burst. WHEN Firewall for AI scores land, replace this with min(injection_score-equivalent) or count(high-risk prompts)." },
-      ],
-      signals: [
-        { signal: "≥ 10 POSTs to /api/v1/chat from one source", catches: "Prompt-injection / jailbreak barrage", why: "Automated injection fuzzing hammers the endpoint; a real user chats at human pace." },
-        { signal: "served (200) count", catches: "Prompts the LLM answered", why: "Answered injection attempts are where system-prompt / secret leakage could occur." },
-        { signal: "(future) high Firewall-for-AI injection score", catches: "Confirmed injection payloads", why: "Content-based confirmation once AI Gateway scoring is ingested — upgrades this from volumetric to definitive." },
-      ],
-      mitre: [
-        { id: "AML.T0054", tactic: "ATLAS Initial Access", name: "LLM Prompt Injection", url: "https://atlas.mitre.org/techniques/AML.T0054" },
-        { id: "AML.T0057", tactic: "ATLAS Exfiltration", name: "LLM Data Leakage", url: "https://atlas.mitre.org/techniques/AML.T0057" },
-        { id: "T1499", tactic: "Impact", name: "Endpoint Denial of Service (resource abuse)", url: "https://attack.mitre.org/techniques/T1499/" },
-      ],
-      falsePositive: {
-        finding: "Not yet observable (no chat traffic seeded). Anticipated FP class: a power user or a legitimate automated integration (support bot, load test) making many chat calls in a short window.",
-        rootCause: "Volumetric-only detection cannot tell a heavy legitimate user from an attacker without body/score inspection.",
-        fix: "Ingest Firewall for AI injection scores and gate on those instead of raw volume; until then allow-list known integration IPs and tune the posts threshold to the endpoint's normal peak rate.",
-      },
-      triage: "SUSPICIOUS — Pending Confirmation, and LOW-CONFIDENCE without content inspection. Confirm via the app's LLM/guardrail logs (were injection strings present? did any response leak the system prompt?) before escalating. The volumetric alert is a lead, not proof.",
-      recommendedResponse: "Rate-limit /api/v1/chat from the source, enable Cloudflare Firewall for AI scoring/guardrails, and review LLM output logs for leaked system-prompt or secrets. Full steps in the Response Playbook tab.",
-    }
-  }
+
 ]

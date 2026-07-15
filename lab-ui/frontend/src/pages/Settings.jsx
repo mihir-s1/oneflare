@@ -399,7 +399,7 @@ function LabIdentitySection({ serverConfig }) {
             value={name}
             onChange={(_, v) => setName(v)}
             placeholder="e.g. alice"
-            note="Becomes your lab subdomain <name>.lab.soledrop.co — letters, numbers, and hyphens only."
+            note="Becomes your lab subdomain <name>.lab.soledrop.co."
           />
           <Field
             label="SentinelOne Region"
@@ -407,7 +407,7 @@ function LabIdentitySection({ serverConfig }) {
             value={s1Region}
             onChange={(_, v) => setS1Region(v)}
             placeholder="us1"
-            note={`The Singularity Data Lake region your HEC endpoint lives in (e.g. us1, eu1, apse2) — default us1; change only if your tenant is elsewhere. Full ingest URL: ${buildHecUrl(s1Region)}`}
+            note={`Your SDL region (default us1). Ingest URL: ${buildHecUrl(s1Region)}`}
           />
           <Field
             label="S1 HEC Write Token"
@@ -416,7 +416,7 @@ function LabIdentitySection({ serverConfig }) {
             onChange={(_, v) => setS1HecToken(v)}
             showToggle
             placeholder="HEC write token from your SentinelOne console"
-            note="A SentinelOne HEC (HTTP Event Collector) ingest token from your console's Singularity Data Lake / AI-SIEM ingest config (e.g. the Cloudflare Marketplace integration or SDL settings) — write-only, sent only to this backend on submit, never stored in your browser."
+            note="Used to send your telemetry to SentinelOne. Create one in the console: Settings → AI-SIEM → API Keys → new Write key."
           />
           <Field
             label="S1 Site"
@@ -424,7 +424,7 @@ function LabIdentitySection({ serverConfig }) {
             value={siteLabel}
             onChange={(_, v) => setSiteLabel(v)}
             placeholder="e.g. Amin Hamidi"
-            note="The SentinelOne Site (under your Account) this lab's telemetry should land in — find it in the console scope selector (Settings → Sites). Display only, not used for routing."
+            note="The SentinelOne Site your telemetry should land in."
           />
           <Field
             label="S1 Account"
@@ -432,7 +432,7 @@ function LabIdentitySection({ serverConfig }) {
             value={accountLabel}
             onChange={(_, v) => setAccountLabel(v)}
             placeholder="e.g. SentinelOne"
-            note="The SentinelOne Account that owns the Site — the top-level scope in your console."
+            note="The SentinelOne Account that owns the Site."
           />
           <Field
             label="S1 Console URL"
@@ -440,7 +440,7 @@ function LabIdentitySection({ serverConfig }) {
             value={s1ConsoleUrl}
             onChange={(_, v) => setS1ConsoleUrl(v)}
             placeholder="e.g. https://usea1-<console>.sentinelone.net"
-            note="Your SentinelOne management console URL — shown as the destination host in the admin tenant list. Falls back to the ingest host if blank."
+            note="Your SentinelOne console URL (optional)."
           />
 
           <div className="flex items-center gap-3 pt-1">

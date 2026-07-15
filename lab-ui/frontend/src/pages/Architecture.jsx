@@ -370,44 +370,24 @@ function ParsersContent() {
 
 const WORKERS = [
   {
-    name: 'Shop Worker',
-    description: 'AcmeCorp webstore — WAF attack surface',
-    url: 'https://acmecorp-shop.acmecorp-lab.workers.dev',
-    routes: ['/search', '/products', '/reviews'],
-    color: 'orange',
-    borderClass: 'border-orange-500/30',
-    bgClass: 'bg-orange-500/5',
-    textClass: 'text-orange-400',
-  },
-  {
-    name: 'Portal Worker',
-    description: 'Cloudflare Access-protected admin portal',
-    url: 'https://acmecorp-portal.acmecorp-lab.workers.dev',
-    routes: ['/login', '/dashboard'],
-    color: 'purple',
-    borderClass: 'border-purple-500/30',
-    bgClass: 'bg-purple-500/5',
-    textClass: 'text-purple-400',
-  },
-  {
-    name: 'API Worker',
-    description: 'REST API with bulk export endpoint',
-    url: 'https://acmecorp-api.acmecorp-lab.workers.dev',
-    routes: ['/api/v1/auth/login', '/api/v1/customers/export'],
-    color: 'blue',
-    borderClass: 'border-blue-500/30',
-    bgClass: 'bg-blue-500/5',
-    textClass: 'text-blue-400',
-  },
-  {
-    name: 'SoleDrop Shop',
-    description: 'Standalone sneaker-drop shop — the OneFlare CTF target. Self-contained Worker with its own /api/incident + KV; attacks flip /status and degrade checkout/admin.',
-    url: 'https://shop.soledrop.co',
-    routes: ['/', '/products', '/status', '/login', '/dashboard', '/admin', '/api/v1/products', '/api/v1/cart', '/api/v1/checkout', '/api/v1/customers', '/api/v1/chat', '/api/incident'],
+    name: 'SoleDrop Shop Worker',
+    description: 'Single Worker serving every attack surface — web, API, and portal — at your per-user subdomain <name>.lab.soledrop.co. Self-contained with its own /api/incident + KV; attacks flip /status and degrade checkout/admin.',
+    url: 'https://shop-soledrop-worker.workers.dev',
+    routes: ['/search', '/products', '/reviews', '/login', '/dashboard', '/admin', '/api/v1/auth/login', '/api/v1/customers/export', '/api/v1/cart', '/api/v1/checkout', '/api/v1/chat', '/api/incident', '/status'],
     color: 'red',
     borderClass: 'border-red-500/30',
     bgClass: 'bg-red-500/5',
     textClass: 'text-red-400',
+  },
+  {
+    name: 'Gateway DNS (admin-only)',
+    description: 'Shared Cloudflare Gateway DoH resolver used by the DNS tunneling / C2 beaconing scenario. Admin-only — not scoped per-user like the shop Worker.',
+    url: 'https://one.dash.cloudflare.com',
+    routes: ['DNS over HTTPS query endpoint'],
+    color: 'blue',
+    borderClass: 'border-blue-500/30',
+    bgClass: 'bg-blue-500/5',
+    textClass: 'text-blue-400',
   },
 ]
 
@@ -550,7 +530,7 @@ export default function Architecture() {
             {
               step: '01',
               title: 'Attack Script Executes',
-              desc: 'Python script sends malicious HTTP requests or DNS queries to the target AcmeCorp Worker endpoint',
+              desc: 'Python script sends malicious HTTP requests or DNS queries to your per-user SoleDrop shop Worker (<name>.lab.soledrop.co)',
               color: 'text-slate-400',
               bg: 'bg-slate-500/10',
               border: 'border-slate-500/20',
@@ -610,7 +590,7 @@ export default function Architecture() {
       <div className="rounded-xl border border-[#2d1b4e] overflow-hidden">
         <div className="px-5 py-4 bg-[#1a0a2e] border-b border-[#2d1b4e] flex items-center gap-2">
           <Server className="w-4 h-4 text-orange-400" />
-          <h2 className="text-sm font-semibold text-slate-300">AcmeCorp Lab Workers</h2>
+          <h2 className="text-sm font-semibold text-slate-300">Lab Workers</h2>
         </div>
         <div className="divide-y divide-[#1e1235]">
           {WORKERS.map(worker => (

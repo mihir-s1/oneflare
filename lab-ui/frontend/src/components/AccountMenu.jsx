@@ -8,7 +8,7 @@
 // discreet footer link in Settings.
 import { useState, useEffect, useRef, useCallback } from 'react'
 import { useNavigate } from 'react-router-dom'
-import { CircleUser, LogOut, Settings as SettingsIcon, ShieldCheck, RefreshCw, X } from 'lucide-react'
+import { CircleUser, LogOut, ShieldCheck, RefreshCw, X } from 'lucide-react'
 import { getMe } from '../lib/session'
 
 function RoleBadge({ role }) {
@@ -183,15 +183,6 @@ export default function AccountMenu() {
                 <RoleBadge role={me.role} />
               </div>
 
-              <button
-                onClick={() => { setOpen(false); navigate('/settings') }}
-                role="menuitem"
-                className="w-full flex items-center gap-2 px-2 py-1.5 rounded-lg text-sm text-slate-300 hover:text-slate-100 hover:bg-white/5 transition-colors"
-              >
-                <SettingsIcon className="w-3.5 h-3.5 shrink-0" />
-                Settings
-              </button>
-
               {canSeeAdmin && (
                 <button
                   onClick={() => { setOpen(false); navigate('/admin') }}
@@ -212,7 +203,7 @@ export default function AccountMenu() {
                 }`}
               >
                 <RefreshCw className="w-3.5 h-3.5 shrink-0" />
-                Switch account / sign in as admin
+                Switch account
               </button>
 
               {showSwitch && (
