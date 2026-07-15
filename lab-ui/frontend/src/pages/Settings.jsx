@@ -2,10 +2,12 @@ import { useState, useEffect } from 'react'
 import {
   ChevronDown, ChevronUp, Shield, Globe, Eye, EyeOff,
   CheckCircle, XCircle, Download, Upload, Info, Zap, AlertTriangle,
-  History as HistoryIcon, Trash2, Clock, X, Fingerprint,
+  History as HistoryIcon, Trash2, Clock, X, Fingerprint, Target,
 } from 'lucide-react'
 import Badge from '../components/Badge.jsx'
 import { SCENARIOS } from '../data/scenarios.js'
+import TargetBar from '../components/TargetBar.jsx'
+import { getMe } from '../lib/session.js'
 
 const STORAGE_KEYS = {
   cf_api_token:        'oneflare_cf_api_token',
@@ -473,6 +475,33 @@ function LabIdentitySection({ serverConfig }) {
   )
 }
 
+// ── Default run target — admin-only ──────────────────────────────────────────
+// The same admin selector shown on the Scenarios run tab, seeded here so a
+// fresh browser has a sane default before ever opening a scenario. Persisted
+// to the same `oneflare_run_target` localStorage key as the per-run picker.
+function DefaultRunTargetSection() {
+  const [role, setRole] = useState(null)
+  useEffect(() => {
+    let alive = true
+    getMe().then(me => { if (alive) setRole(me?.role || null) })
+    return () => { alive = false }
+  }, [])
+
+  if (role !== 'admin') return null
+
+  return (
+    <Section title="Default Run Target" icon={Target} defaultOpen={false}>
+      <div className="space-y-3">
+        <p className="text-sm text-slate-400 leading-relaxed">
+          Which subdomain your scenario &amp; campaign runs target by default. Admins can
+          override per-run on the Scenarios page.
+        </p>
+        <TargetBar scope="scenario" />
+      </div>
+    </Section>
+  )
+}
+
 export default function Settings() {
   const [settings, setSettings] = useState(loadSettings)
   const [testStatus, setTestStatus] = useState(null) // null | 'testing' | 'ok' | 'fail'
@@ -616,6 +645,9 @@ export default function Settings() {
 
       {/* Section 0: Lab Identity — multi-tenant relay registration */}
       <LabIdentitySection serverConfig={serverConfig} />
+
+      {/* Section 0b: Default run target — admin-only */}
+      <DefaultRunTargetSection />
 
       {/* Section 1: Cloudflare */}
       <Section title="Cloudflare Configuration" icon={Shield} defaultOpen={true}>

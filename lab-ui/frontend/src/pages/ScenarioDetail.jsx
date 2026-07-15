@@ -10,6 +10,8 @@ import { SCENARIOS } from '../data/scenarios.js'
 import Badge from '../components/Badge.jsx'
 import Terminal from '../components/Terminal.jsx'
 import RunSummary from '../components/RunSummary.jsx'
+import TargetBar from '../components/TargetBar.jsx'
+import { getMe, getTenants, getRunTarget } from '../lib/session.js'
 
 const TABS = [
   { id: 'overview',  label: 'Overview',         icon: Info },
@@ -253,7 +255,19 @@ export default function ScenarioDetail() {
   const [exitCode, setExitCode] = useState(null)
   const [startTime, setStartTime] = useState(null)
   const [duration, setDuration] = useState(null)
+  const [needsLogin, setNeedsLogin] = useState(false)
   const wsRef = useRef(null)
+  const cancelRef = useRef(false)
+
+  // Session (role) — decides whether a run targets the caller's own
+  // subdomain (non-admin, forced server-side) or an admin-selected target
+  // (including the scenario-only "__all__" fan-out).
+  const [session, setSession] = useState(null)
+  useEffect(() => {
+    let alive = true
+    getMe().then(me => { if (alive) setSession(me) })
+    return () => { alive = false }
+  }, [])
 
   // Non-sensitive run config is served by the backend (GET /api/config) so a
   // fresh browser is pre-configured and anyone can run scenarios with zero setup.
@@ -296,69 +310,100 @@ export default function ScenarioDetail() {
     )
   }
 
-  function handleRun() {
+  // Opens one WS run against `targetSubdomain` ('' = one-flare default; a
+  // non-admin always sends '' and the backend forces their own subdomain
+  // regardless). Resolves with the exit code once the socket closes.
+  function runSingle(targetSubdomain, prefixLine) {
+    return new Promise((resolve) => {
+      const wsUrl = `${window.location.protocol === 'https:' ? 'wss' : 'ws'}://${window.location.host}/ws/run/${scenario.id}`
+      const ws = new WebSocket(wsUrl)
+      wsRef.current = ws
+      let lastExitCode = null
+
+      ws.onopen = () => {
+        if (prefixLine) setLines(prev => [...prev, prefixLine])
+        const config = {
+          domain,
+          shop_url: shopUrl,
+          portal_url: portalUrl,
+          api_url: apiUrl,
+          delay: parseFloat(attackDelay),
+          jitter: parseFloat(attackJitter),
+          gateway_doh_url: gatewayDohUrl,
+          target_subdomain: targetSubdomain,
+        }
+        ws.send(JSON.stringify(config))
+      }
+
+      ws.onmessage = (evt) => {
+        try {
+          const msg = JSON.parse(evt.data)
+          if (msg.type === 'output') {
+            setLines(prev => [...prev, msg.line])
+          } else if (msg.type === 'start') {
+            setLines(prev => [...prev, `► Starting scenario: ${msg.scenario}`])
+          } else if (msg.type === 'done') {
+            lastExitCode = msg.exit_code
+          } else if (msg.type === 'error') {
+            setLines(prev => [...prev, `ERROR: ${msg.message}`])
+            if (String(msg.message || '').toLowerCase().includes('log in')) setNeedsLogin(true)
+          }
+        } catch {}
+      }
+
+      ws.onerror = () => {
+        setLines(prev => [...prev, 'ERROR: WebSocket connection failed. Is the backend running?'])
+      }
+
+      ws.onclose = () => resolve(lastExitCode)
+    })
+  }
+
+  async function handleRun() {
     if (isRunning) {
+      cancelRef.current = true
       wsRef.current?.close()
       setIsRunning(false)
       return
     }
 
+    const start = Date.now()
+    cancelRef.current = false
     setLines([])
     setRunDone(false)
     setExitCode(null)
-    setStartTime(Date.now())
+    setNeedsLogin(false)
+    setStartTime(start)
     setIsRunning(true)
 
-    const wsUrl = `${window.location.protocol === 'https:' ? 'wss' : 'ws'}://${window.location.host}/ws/run/${scenario.id}`
-    const ws = new WebSocket(wsUrl)
-    wsRef.current = ws
+    const isAdmin = session?.role === 'admin'
+    const storedTarget = isAdmin ? getRunTarget() : ''
 
-    ws.onopen = () => {
-      const config = {
-        domain,
-        shop_url: shopUrl,
-        portal_url: portalUrl,
-        api_url: apiUrl,
-        delay: parseFloat(attackDelay),
-        jitter: parseFloat(attackJitter),
-        gateway_doh_url: gatewayDohUrl,
-      }
-      ws.send(JSON.stringify(config))
-    }
+    let finalExitCode = null
 
-    ws.onmessage = (evt) => {
-      try {
-        const msg = JSON.parse(evt.data)
-        if (msg.type === 'output') {
-          setLines(prev => [...prev, msg.line])
-        } else if (msg.type === 'start') {
-          setLines(prev => [...prev, `► Starting scenario: ${msg.scenario}`])
-        } else if (msg.type === 'done') {
-          const dur = ((Date.now() - startTime) / 1000).toFixed(1) + 's'
-          setDuration(dur)
-          setExitCode(msg.exit_code)
-          setRunDone(true)
-          setIsRunning(false)
-          setLines(prev => {
-            saveRunToHistory(scenario, prev, msg.exit_code)
-            return prev
-          })
-        } else if (msg.type === 'error') {
-          setLines(prev => [...prev, `ERROR: ${msg.message}`])
-          setIsRunning(false)
-          setRunDone(true)
+    if (isAdmin && storedTarget === '__all__') {
+      const tenants = await getTenants()
+      if (!tenants.length) {
+        setLines(prev => [...prev, 'No registered tenants found — nothing to fan out to.'])
+      } else {
+        for (const t of tenants) {
+          if (cancelRef.current) break
+          finalExitCode = await runSingle(t.subdomain, `── [${t.subdomain}] ──`)
         }
-      } catch {}
+      }
+    } else {
+      finalExitCode = await runSingle(isAdmin ? storedTarget : '', null)
     }
 
-    ws.onerror = () => {
-      setLines(prev => [...prev, 'ERROR: WebSocket connection failed. Is the backend running?'])
-      setIsRunning(false)
-    }
-
-    ws.onclose = () => {
-      if (isRunning) setIsRunning(false)
-    }
+    const dur = ((Date.now() - start) / 1000).toFixed(1) + 's'
+    setDuration(dur)
+    setExitCode(finalExitCode)
+    setRunDone(true)
+    setIsRunning(false)
+    setLines(prev => {
+      saveRunToHistory(scenario, prev, finalExitCode)
+      return prev
+    })
   }
 
   const allScenarios = SCENARIOS
@@ -613,6 +658,9 @@ export default function ScenarioDetail() {
               </div>
             )}
 
+            {/* Run target — who/where this attack fires against */}
+            <TargetBar scope="scenario" />
+
             {/* Run button */}
             <div className="flex items-center gap-3">
               <button
@@ -640,6 +688,13 @@ export default function ScenarioDetail() {
                 >
                   Clear
                 </button>
+              )}
+              {needsLogin && (
+                <span className="text-xs text-amber-300 flex items-center gap-1.5">
+                  <AlertTriangle className="w-3.5 h-3.5" />
+                  Please log in to run scenarios.
+                  <Link to="/admin" className="text-orange-400 underline hover:no-underline">Log in →</Link>
+                </span>
               )}
             </div>
 

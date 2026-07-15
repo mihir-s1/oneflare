@@ -1,10 +1,12 @@
 import { useState, useEffect, useRef, useCallback } from 'react'
-import { useSearchParams } from 'react-router-dom'
+import { useSearchParams, Link } from 'react-router-dom'
 import {
   Swords, Play, Square, Trash2, RefreshCw,
   Radio, Moon, Shield, Bot,
   Syringe, Zap, AlertTriangle, CheckCircle2, ExternalLink,
 } from 'lucide-react'
+import TargetBar from '../components/TargetBar.jsx'
+import { effectiveRunTarget } from '../lib/session.js'
 
 // ── Engine constants (mirror backend) ────────────────────────────────────────
 const LIVE_BATCH_SECONDS    = 30
@@ -639,6 +641,9 @@ export default function ThreatOps() {
   // ── Clear incident ──────────────────────────────────────────────────
   const [clearingIncident, setClearingIncident] = useState(false)
 
+  // ── Login-gated launch/stop prompt (401 from the backend) ───────────────
+  const [loginPrompt, setLoginPrompt] = useState(false)
+
   // ── Refs ──────────────────────────────────────────────────────────────────
   const pollRef   = useRef(null)
   const timerRef  = useRef(null)
@@ -806,6 +811,7 @@ export default function ThreatOps() {
       mode:     indMode,
       phase:    indMode === 'preseed' ? indPhase : 'all',
       volume:   indVolume,
+      target_subdomain: effectiveRunTarget('campaign'),
     }
 
     try {
@@ -816,7 +822,12 @@ export default function ThreatOps() {
       })
       if (!res.ok) {
         const err = await res.json().catch(() => ({}))
-        setIndLog([{ type: 'error', text: err.error || `Launch failed (HTTP ${res.status})`, ts: new Date().toLocaleTimeString('en-US', { hour12: false }) }])
+        if (res.status === 401) {
+          setLoginPrompt(true)
+          setIndLog([{ type: 'error', text: err.detail || 'Please log in to run campaigns.', ts: new Date().toLocaleTimeString('en-US', { hour12: false }) }])
+        } else {
+          setIndLog([{ type: 'error', text: err.detail || err.error || `Launch failed (HTTP ${res.status})`, ts: new Date().toLocaleTimeString('en-US', { hour12: false }) }])
+        }
         return
       }
     } catch (_) {
@@ -824,6 +835,7 @@ export default function ThreatOps() {
       return
     }
 
+    setLoginPrompt(false)
     setRunning(true)
     startPolling(selectedIndustry)
     if (indMode === 'live') startLiveTimer()
@@ -855,6 +867,7 @@ export default function ThreatOps() {
       mode:     ctfMode,
       phase:    ctfMode === 'preseed' ? ctfPhase : 'all',
       volume:   ctfVolume,
+      target_subdomain: effectiveRunTarget('campaign'),
     }
 
     try {
@@ -865,7 +878,12 @@ export default function ThreatOps() {
       })
       if (!res.ok) {
         const err = await res.json().catch(() => ({}))
-        setCtfLog([{ type: 'error', text: err.error || `Launch failed (HTTP ${res.status})`, ts: new Date().toLocaleTimeString('en-US', { hour12: false }) }])
+        if (res.status === 401) {
+          setLoginPrompt(true)
+          setCtfLog([{ type: 'error', text: err.detail || 'Please log in to run campaigns.', ts: new Date().toLocaleTimeString('en-US', { hour12: false }) }])
+        } else {
+          setCtfLog([{ type: 'error', text: err.detail || err.error || `Launch failed (HTTP ${res.status})`, ts: new Date().toLocaleTimeString('en-US', { hour12: false }) }])
+        }
         return
       }
     } catch (_) {
@@ -873,6 +891,7 @@ export default function ThreatOps() {
       return
     }
 
+    setLoginPrompt(false)
     setRunning(true)
     startPolling('ctf')
     if (ctfMode === 'live') startLiveTimer()
@@ -880,7 +899,10 @@ export default function ThreatOps() {
 
   // ── Stop ──────────────────────────────────────────────────────────────────
   async function handleStop() {
-    try { await fetch('/api/campaign/stop', { method: 'POST' }) } catch (_) {}
+    try {
+      const res = await fetch('/api/campaign/stop', { method: 'POST' })
+      if (res.status === 401) setLoginPrompt(true)
+    } catch (_) {}
     stopPolling()
     setRunning(false)
     const entry = { type: 'info', text: 'Campaign stopped by user.', ts: new Date().toLocaleTimeString('en-US', { hour12: false }) }
@@ -934,6 +956,15 @@ export default function ThreatOps() {
           <span className="text-xs font-mono text-slate-500">{running ? 'Running...' : 'Idle'}</span>
         </div>
       </div>
+
+      {/* Login-gated launch/stop prompt */}
+      {loginPrompt && (
+        <div className="rounded-xl border border-amber-500/25 bg-amber-500/5 p-3 flex items-center gap-2.5 text-sm">
+          <AlertTriangle className="w-4 h-4 text-amber-400 shrink-0" />
+          <span className="text-amber-300">Please log in to run campaigns.</span>
+          <Link to="/admin" className="text-orange-400 underline hover:no-underline ml-auto shrink-0">Log in →</Link>
+        </div>
+      )}
 
       {/* Stats bar — always visible */}
       <StatsBar stats={stats} />
@@ -1021,7 +1052,8 @@ export default function ThreatOps() {
           {/* Step 2: Configure + Launch */}
           <div>
             <SectionLabel>Step 2 — Configure &amp; Launch</SectionLabel>
-            <div className="grid grid-cols-1 lg:grid-cols-[380px_1fr] gap-4 items-start">
+            <TargetBar scope="campaign" />
+            <div className="grid grid-cols-1 lg:grid-cols-[380px_1fr] gap-4 items-start mt-3">
 
               {/* Left: controls + timeline */}
               <div className="space-y-4">
@@ -1131,6 +1163,9 @@ export default function ThreatOps() {
           {/* Step 2 CTF: Configure + Launch */}
           <div>
             <SectionLabel>Step 2 — Configure &amp; Launch CTF</SectionLabel>
+            <div className="mb-4">
+              <TargetBar scope="campaign" />
+            </div>
 
             {/* Full-width horizontal box-progress timeline */}
             <div className="rounded-xl border border-[#2d1b4e] bg-[#1a0a2e] overflow-hidden mb-4">
