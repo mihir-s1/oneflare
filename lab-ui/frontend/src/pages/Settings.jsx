@@ -275,9 +275,18 @@ function HistoryContent() {
 const LAB_NAME_KEY = 'oneflare_lab_name'
 const LAB_SUBDOMAIN_KEY = 'oneflare_lab_subdomain'
 
+// The S1 HEC ingest URL is a fixed template — only the region varies. Users pick
+// the region (default us1); the full URL is assembled for them.
+const HEC_PATH = '/services/collector/raw?sourcetype=marketplace-cloudflare-latest'
+const buildHecUrl = (region) => `https://ingest.${(region || 'us1').trim() || 'us1'}.sentinelone.net${HEC_PATH}`
+const parseHecRegion = (url) => {
+  const m = /ingest\.([^.]+)\.sentinelone\.net/i.exec(url || '')
+  return m ? m[1] : 'us1'
+}
+
 function LabIdentitySection({ serverConfig }) {
   const [name, setName] = useState(() => localStorage.getItem(LAB_NAME_KEY) || '')
-  const [s1HecUrl, setS1HecUrl] = useState('')
+  const [s1Region, setS1Region] = useState('us1')
   const [s1HecToken, setS1HecToken] = useState('')
   const [siteLabel, setSiteLabel] = useState('')
   const [accountLabel, setAccountLabel] = useState('')
@@ -307,7 +316,7 @@ function LabIdentitySection({ serverConfig }) {
         if (data.identity) {
           setIdentity(data.identity)
           setName(data.identity.name || '')
-          setS1HecUrl(data.identity.s1_hec_url || '')
+          setS1Region(parseHecRegion(data.identity.s1_hec_url))
           setSiteLabel(data.identity.site_label || '')
           setAccountLabel(data.identity.account_label || '')
           setS1ConsoleUrl(data.identity.s1_console_url || '')
@@ -329,7 +338,7 @@ function LabIdentitySection({ serverConfig }) {
         method: 'POST',
         headers: { 'Content-Type': 'application/json' },
         body: JSON.stringify({
-          name, s1_hec_url: s1HecUrl, s1_hec_token: s1HecToken,
+          name, s1_hec_url: buildHecUrl(s1Region), s1_hec_token: s1HecToken,
           site_label: siteLabel, account_label: accountLabel,
           s1_console_url: s1ConsoleUrl || undefined,
         }),
@@ -393,11 +402,12 @@ function LabIdentitySection({ serverConfig }) {
             note="Letters, numbers, and hyphens only — becomes your lab subdomain (<name>.lab.soledrop.co)."
           />
           <Field
-            label="S1 HEC Ingest URL"
-            fieldKey="lab_s1_hec_url"
-            value={s1HecUrl}
-            onChange={(_, v) => setS1HecUrl(v)}
-            placeholder="https://ingest.<region>.sentinelone.net/services/collector/raw?sourcetype=marketplace-cloudflare-latest"
+            label="SentinelOne Region"
+            fieldKey="lab_s1_region"
+            value={s1Region}
+            onChange={(_, v) => setS1Region(v)}
+            placeholder="us1"
+            note={`Your SDL ingest region (default us1). Full ingest URL: ${buildHecUrl(s1Region)}`}
           />
           <Field
             label="S1 HEC Write Token"
@@ -413,7 +423,7 @@ function LabIdentitySection({ serverConfig }) {
             fieldKey="lab_site_label"
             value={siteLabel}
             onChange={(_, v) => setSiteLabel(v)}
-            placeholder="e.g. ahamidi"
+            placeholder="e.g. Amin Hamidi"
             note="Required. The SentinelOne site this instance's logs land in — named in the admin tenant list (display only, not used for routing)."
           />
           <Field
@@ -429,14 +439,14 @@ function LabIdentitySection({ serverConfig }) {
             fieldKey="lab_s1_console_url"
             value={s1ConsoleUrl}
             onChange={(_, v) => setS1ConsoleUrl(v)}
-            placeholder="e.g. https://usea1-purple.sentinelone.net"
-            note="Optional. Your console/'purple' domain — shown as the destination host in the admin list. Falls back to the ingest host if blank."
+            placeholder="e.g. https://usea1-<console>.sentinelone.net"
+            note="Optional. Your SentinelOne console domain — shown as the destination host in the admin list. Falls back to the ingest host if blank."
           />
 
           <div className="flex items-center gap-3 pt-1">
             <button
               type="submit"
-              disabled={registering || !name || !s1HecUrl || !s1HecToken || !siteLabel || !accountLabel}
+              disabled={registering || !name || !s1Region || !s1HecToken || !siteLabel || !accountLabel}
               className="btn-orange text-sm disabled:opacity-40"
             >
               {registering ? (

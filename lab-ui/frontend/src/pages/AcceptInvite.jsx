@@ -48,7 +48,10 @@ export default function AcceptInvite() {
         return
       }
       setDone(true)
-      setTimeout(() => navigate('/admin'), 1200)
+      // Admins/viewers land in the admin console; a regular user lands on the
+      // home page (the admin area would just show them "administrators only").
+      const dest = (data.role === 'admin' || data.role === 'viewer') ? '/admin' : '/'
+      setTimeout(() => navigate(dest), 1200)
     } catch (err) {
       setError('Could not reach backend. Is Docker running?')
     } finally {
@@ -61,7 +64,7 @@ export default function AcceptInvite() {
       <div className="page-enter max-w-sm mx-auto rounded-xl border border-green-500/30 bg-green-500/5 p-8 flex flex-col items-center gap-3 text-center">
         <CheckCircle className="w-8 h-8 text-green-400" />
         <p className="text-slate-100 font-semibold">Account created</p>
-        <p className="text-sm text-slate-400">Redirecting to the admin console...</p>
+        <p className="text-sm text-slate-400">Signing you in…</p>
       </div>
     )
   }
