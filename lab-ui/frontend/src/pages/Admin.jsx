@@ -3,8 +3,9 @@ import { Link } from 'react-router-dom'
 import {
   ShieldCheck, RefreshCw, Users, History as HistoryIcon,
   Power, PowerOff, Trash2, Lock, PlugZap, AlertTriangle, Clock,
-  LogOut, UserPlus, Copy, Check, Mail, KeyRound,
+  LogOut, UserPlus, Copy, Check, Mail, KeyRound, UserCheck, X,
 } from 'lucide-react'
+import RequestAccountForm from '../components/RequestAccountForm'
 
 // ── Helpers ───────────────────────────────────────────────────────────────────
 function formatTime(iso) {
@@ -74,6 +75,7 @@ function LoginForm({ onLoggedIn }) {
   const [password, setPassword] = useState('')
   const [busy, setBusy] = useState(false)
   const [error, setError] = useState('')
+  const [showRequest, setShowRequest] = useState(false)
 
   async function handleSubmit(e) {
     e.preventDefault()
@@ -96,6 +98,21 @@ function LoginForm({ onLoggedIn }) {
     } finally {
       setBusy(false)
     }
+  }
+
+  if (showRequest) {
+    return (
+      <div className="rounded-xl border border-[#2d1b4e] bg-[#1a0a2e]/50 p-8 max-w-sm mx-auto flex flex-col items-center gap-4">
+        <div className="w-12 h-12 rounded-xl bg-orange-500/10 border border-orange-500/20 flex items-center justify-center">
+          <UserPlus className="w-6 h-6 text-orange-400" />
+        </div>
+        <div className="text-center">
+          <p className="text-slate-100 font-semibold">Request an account</p>
+          <p className="text-sm text-slate-500 mt-1">An admin reviews your request and emails you an invite.</p>
+        </div>
+        <RequestAccountForm onCancel={() => setShowRequest(false)} />
+      </div>
+    )
   }
 
   return (
@@ -136,6 +153,15 @@ function LoginForm({ onLoggedIn }) {
           {busy ? 'Signing in...' : 'Sign in'}
         </button>
       </form>
+      <div className="w-full pt-3 border-t border-[#2d1b4e] text-center">
+        <button
+          onClick={() => setShowRequest(true)}
+          className="text-xs text-slate-400 hover:text-orange-400 transition-colors inline-flex items-center gap-1.5"
+        >
+          <UserPlus className="w-3.5 h-3.5" />
+          Don't have an account? Request one
+        </button>
+      </div>
     </div>
   )
 }
@@ -403,6 +429,8 @@ function BulkResultRow({ result }) {
 function UsersTab({ role }) {
   const [users, setUsers] = useState([])
   const [invites, setInvites] = useState([])
+  const [requests, setRequests] = useState([])
+  const [reqBusy, setReqBusy] = useState(null) // token currently being accepted/declined
   const [loading, setLoading] = useState(true)
   const [error, setError] = useState('')
   const [inviteEmail, setInviteEmail] = useState('')
@@ -429,6 +457,7 @@ function UsersTab({ role }) {
       }
       setUsers(data.users || [])
       setInvites(data.invites || [])
+      setRequests(data.requests || [])
       setError('')
     } catch (err) {
       setError('Could not reach backend.')
@@ -487,6 +516,41 @@ function UsersTab({ role }) {
       setBulkError('Could not reach backend.')
     } finally {
       setBulkInviting(false)
+    }
+  }
+
+  async function handleAcceptRequest(token) {
+    setReqBusy(token)
+    try {
+      const res = await fetch('/api/auth/accept-request', {
+        method: 'POST',
+        headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify({ token, role: 'user' }),
+      })
+      const data = await res.json().catch(() => ({}))
+      if (!res.ok) {
+        setError(data.error || data.detail || 'Failed to accept request')
+        return
+      }
+      if (data.invite_url) setLastInvite(data)
+      await load()
+    } catch (err) {
+      setError('Could not reach backend.')
+    } finally {
+      setReqBusy(null)
+    }
+  }
+
+  async function handleDeclineRequest(token, email) {
+    if (!window.confirm(`Decline the account request from ${email}?`)) return
+    setReqBusy(token)
+    try {
+      await fetch(`/api/auth/requests/${encodeURIComponent(token)}`, { method: 'DELETE' })
+      await load()
+    } catch (err) {
+      // best-effort
+    } finally {
+      setReqBusy(null)
     }
   }
 
@@ -630,6 +694,43 @@ function UsersTab({ role }) {
             {inviting ? 'Inviting...' : 'Invite'}
           </button>
         </form>
+      )}
+
+      {isAdmin && requests.length > 0 && (
+        <div className="rounded-xl border border-orange-500/30 bg-orange-500/[0.04] overflow-hidden">
+          <div className="px-5 py-3 border-b border-orange-500/20 flex items-center gap-2">
+            <UserCheck className="w-4 h-4 text-orange-400" />
+            <p className="text-sm font-semibold text-slate-200">
+              Account requests <span className="text-orange-400">({requests.length})</span>
+            </p>
+          </div>
+          {requests.map((r) => (
+            <div key={r.token} className="flex flex-wrap items-center justify-between gap-3 px-5 py-3.5 border-b border-orange-500/10 last:border-0">
+              <div className="min-w-0">
+                {r.name && <p className="text-sm text-slate-200 truncate">{r.name}</p>}
+                <p className="text-xs font-mono text-slate-400 truncate">{r.email}</p>
+                <p className="text-[11px] text-slate-600 mt-0.5">Requested {formatTime(r.created_at)}</p>
+              </div>
+              <div className="flex items-center gap-2 shrink-0">
+                <button
+                  onClick={() => handleDeclineRequest(r.token, r.email)}
+                  disabled={reqBusy === r.token}
+                  className="btn-ghost text-xs px-2.5 py-1.5 text-slate-400 hover:text-red-300 hover:border-red-500/30 disabled:opacity-40"
+                >
+                  <X className="w-3.5 h-3.5" /> Decline
+                </button>
+                <button
+                  onClick={() => handleAcceptRequest(r.token)}
+                  disabled={reqBusy === r.token}
+                  className="btn-primary text-xs px-2.5 py-1.5 disabled:opacity-40"
+                >
+                  {reqBusy === r.token ? <RefreshCw className="w-3.5 h-3.5 animate-spin" /> : <UserCheck className="w-3.5 h-3.5" />}
+                  Accept &amp; invite
+                </button>
+              </div>
+            </div>
+          ))}
+        </div>
       )}
 
       <div className="rounded-xl border border-[#2d1b4e] overflow-hidden">

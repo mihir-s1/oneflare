@@ -53,6 +53,12 @@ const VALIDATION_PING = '{"content":"tests"}';
 const ADMIN_USER_PREFIX = "__admin_user__:";
 const INVITE_PREFIX = "__invite__:";
 const SESSION_PREFIX = "__session__:";
+// Self-service "request an account" rows. A logged-OUT visitor (already past the
+// Cloudflare Access OTP gate, but with no console account yet) submits name+email
+// → one of these lands here and all admins are emailed a tokenized accept link.
+// Accepting turns it into a normal `user` invite. Also "__"-prefixed → excluded
+// from listRegistryRows so it never leaks into /admin/registry.
+const ACCTREQ_PREFIX = "__acctreq__:";
 // owner_email -> host index, so "which tenant does this user own?" is an O(1)
 // point get (strongly read-after-write) rather than a list() scan (which lags a
 // fresh write by up to ~60s). Also __-prefixed → excluded from listRegistryRows.
@@ -378,6 +384,40 @@ async function listInvites(env) {
 function isExpired(isoString) {
   const t = new Date(isoString).getTime();
   return !Number.isFinite(t) || t < Date.now();
+}
+
+// ── KV: self-service account requests (see handleRequestAccount) ─────────────
+// TTL-backed so abandoned requests self-clean; isExpired() still guards reads in
+// case KV GC lags.
+const ACCTREQ_TTL_MS = 30 * 24 * 60 * 60 * 1000; // 30 days
+
+async function createAccountRequest(env, name, email) {
+  const token = randomToken(32);
+  const now = Date.now();
+  const row = {
+    name: String(name || "").trim().slice(0, 200),
+    email: normEmail(email),
+    created_at: new Date(now).toISOString(),
+    expires_at: new Date(now + ACCTREQ_TTL_MS).toISOString(),
+  };
+  await env.REGISTRY.put(ACCTREQ_PREFIX + token, JSON.stringify(row), {
+    expirationTtl: Math.floor(ACCTREQ_TTL_MS / 1000),
+  });
+  return { token, row };
+}
+
+async function getAccountRequest(env, token) {
+  const raw = await env.REGISTRY.get(ACCTREQ_PREFIX + token);
+  return raw ? JSON.parse(raw) : null;
+}
+
+async function deleteAccountRequest(env, token) {
+  await env.REGISTRY.delete(ACCTREQ_PREFIX + token);
+}
+
+async function listAccountRequests(env) {
+  const rows = await listByPrefix(env, ACCTREQ_PREFIX);
+  return rows.map(({ key, row }) => ({ ...row, token: key.slice(ACCTREQ_PREFIX.length) }));
 }
 
 async function createSession(env, email, role) {
@@ -945,6 +985,149 @@ async function onboardInvites(env, entries) {
   return sent.filter(Boolean).length;
 }
 
+// ── Self-service account requests (email all admins → they accept → invite) ──
+
+function accountRequestEmailHtml(req, accept_url) {
+  const who = req.name ? `${req.name} (${req.email})` : req.email;
+  return (
+    `<p><strong>${who}</strong> requested a <strong>OneFlare ThreatOps</strong> account.</p>` +
+    `<p><a href="${accept_url}">Review &amp; accept the request</a> — accepting emails them an invite ` +
+    `to set a password and adds them to the Access allow-list.</p>` +
+    `<p style="color:#888">You're receiving this because you're a OneFlare admin.</p>`
+  );
+}
+
+// Email every admin the tokenized accept link (no-op without RESEND_API_KEY).
+// Returns the number of recipients emailed.
+async function sendAccountRequestEmail(env, toEmails, req, accept_url) {
+  const recipients = [...new Set((toEmails || []).map(normEmail).filter(Boolean))];
+  if (!env.RESEND_API_KEY || !recipients.length) return 0;
+  try {
+    const res = await fetch("https://api.resend.com/emails", {
+      method: "POST",
+      headers: {
+        "Authorization": `Bearer ${env.RESEND_API_KEY}`,
+        "Content-Type": "application/json",
+      },
+      body: JSON.stringify({
+        from: env.LAB_INVITE_FROM || "OneFlare Lab <onboarding@one-flare.com>",
+        to: recipients,
+        subject: `OneFlare account request from ${req.name || req.email}`,
+        html: accountRequestEmailHtml(req, accept_url),
+      }),
+    });
+    if (!res.ok) {
+      console.error("Resend acct-request email non-2xx:", res.status, (await res.text()).slice(0, 200));
+      return 0;
+    }
+    return recipients.length;
+  } catch (err) {
+    console.error("Resend acct-request email failed:", err && err.message);
+    return 0;
+  }
+}
+
+// POST /auth/request-account — PUBLIC (no session). A visitor without a console
+// account submits name+email; all admins are emailed a tokenized accept link.
+// No auth here by design: the whole console sits behind Cloudflare Access, so the
+// requester is already OTP-gated. Never reveals account state to an anon caller
+// (always 200) and skips creating a request (and admin email) if the email already
+// has an account / live invite / outstanding request — so it can't be used to spam.
+async function handleRequestAccount(request, env) {
+  if (request.method !== "POST") return json({ error: "method not allowed" }, 405);
+  let body;
+  try {
+    body = await request.json();
+  } catch {
+    return json({ error: "invalid JSON body" }, 400);
+  }
+  const name = String((body && body.name) || "").trim().slice(0, 200);
+  const email = normEmail(body && body.email);
+  if (!email || !/^[^@\s]+@[^@\s]+\.[^@\s]+$/.test(email)) {
+    return json({ error: "a valid email is required" }, 400);
+  }
+
+  const already = await getAdminUser(env, email);
+  const pendingInvite = (await listInvites(env)).some(
+    (i) => normEmail(i.email) === email && !isExpired(i.expires_at)
+  );
+  const pendingReq = (await listAccountRequests(env)).find(
+    (r) => normEmail(r.email) === email && !isExpired(r.expires_at)
+  );
+  if (already || pendingInvite || pendingReq) {
+    // Idempotent: acknowledge without leaking which state they're in.
+    return json({ ok: true, status: already ? "exists" : pendingInvite ? "invited" : "pending" });
+  }
+
+  const { token, row } = await createAccountRequest(env, name, email);
+  await appendHistory(env, { type: "account_requested", email, name: row.name });
+  const accept_url = `${ADMIN_CONSOLE_ORIGIN}/admin/accept-request?token=${token}`;
+  const admins = (await listAdminUsers(env)).filter((u) => u.role === "admin").map((u) => u.email);
+  const emailed = await sendAccountRequestEmail(env, admins, row, accept_url);
+  return json({ ok: true, status: "requested", admins_notified: emailed });
+}
+
+// GET /auth/request-info?token= — admin/viewer-gated lookup so the accept-request
+// page can show who requested (name + email) before the admin accepts.
+async function handleRequestInfo(request, env) {
+  const gate = await requireAuthGate(request, env, { allowViewer: true });
+  if (gate.error) return gate.error;
+  const url = new URL(request.url);
+  const token = url.searchParams.get("token") || "";
+  if (!token) return json({ error: "token is required" }, 400);
+  const req = await getAccountRequest(env, token);
+  if (!req || isExpired(req.expires_at)) return json({ error: "invalid or expired request" }, 404);
+  return json({ ok: true, name: req.name || null, email: req.email, created_at: req.created_at });
+}
+
+// POST /auth/accept-request — admin: turn a request into a `user` invite (reusing
+// the invite + onboarding path — emails the invitee + Access-allowlists them).
+async function handleAcceptRequest(request, env) {
+  const gate = await requireAuthGate(request, env);
+  if (gate.error) return gate.error;
+  if (request.method !== "POST") return json({ error: "method not allowed" }, 405);
+  let body;
+  try {
+    body = await request.json();
+  } catch {
+    return json({ error: "invalid JSON body" }, 400);
+  }
+  const token = String((body && body.token) || "");
+  if (!token) return json({ error: "token is required" }, 400);
+  const role = body && ROLES.includes(body.role) ? body.role : "user";
+
+  const req = await getAccountRequest(env, token);
+  if (!req) return json({ error: "invalid or expired request" }, 404);
+  const email = normEmail(req.email);
+  if (await getAdminUser(env, email)) {
+    await deleteAccountRequest(env, token);
+    return json({ error: "user already exists" }, 409);
+  }
+
+  const { token: inviteToken, row } = await createInvite(env, email, role, gate.auth.email);
+  await deleteAccountRequest(env, token);
+  await appendHistory(env, {
+    type: "account_request_accepted", email, role, accepted_by: gate.auth.email || "admin_token",
+  });
+  const invite_url = `${ADMIN_CONSOLE_ORIGIN}/admin/accept-invite?token=${inviteToken}`;
+  const sent = await onboardInvites(env, [{ email, invite_url, role }]);
+  return json({ ok: true, email, role, invite_url, expires_at: row.expires_at, email_sent: sent > 0 });
+}
+
+// DELETE /auth/requests/:token — admin: dismiss a request without inviting.
+async function handleDeclineRequest(request, env, rawToken) {
+  const gate = await requireAuthGate(request, env);
+  if (gate.error) return gate.error;
+  const token = decodeURIComponent(rawToken || "");
+  const req = await getAccountRequest(env, token);
+  if (!req) return json({ error: "not found" }, 404);
+  await deleteAccountRequest(env, token);
+  await appendHistory(env, {
+    type: "account_request_declined", email: req.email, declined_by: gate.auth.email || "admin_token",
+  });
+  return json({ ok: true, deleted: true });
+}
+
 async function handleAuthInvite(request, env) {
   const gate = await requireAuthGate(request, env);
   if (gate.error) return gate.error;
@@ -1088,6 +1271,7 @@ async function handleAuthUsers(request, env) {
 
   const users = await listAdminUsers(env);
   const invites = await listInvites(env);
+  const requests = await listAccountRequests(env);
   return json({
     ok: true,
     users: users
@@ -1097,6 +1281,10 @@ async function handleAuthUsers(request, env) {
       .filter((i) => !isExpired(i.expires_at))
       .map((i) => ({ email: i.email, role: i.role, expires_at: i.expires_at }))
       .sort((a, b) => a.email.localeCompare(b.email)),
+    requests: requests
+      .filter((r) => !isExpired(r.expires_at))
+      .map((r) => ({ token: r.token, name: r.name || null, email: r.email, created_at: r.created_at }))
+      .sort((a, b) => String(a.created_at).localeCompare(String(b.created_at))),
   });
 }
 
@@ -1285,6 +1473,11 @@ export default {
     if (path === "/auth/invite-bulk" && request.method === "POST") return handleAuthInviteBulk(request, env);
     if (path === "/auth/invite-info" && request.method === "GET") return handleAuthInviteInfo(request, env);
     if (path === "/auth/accept-invite" && request.method === "POST") return handleAuthAcceptInvite(request, env);
+
+    // Self-service account requests: request-account is PUBLIC; the rest are admin-gated.
+    if (path === "/auth/request-account" && request.method === "POST") return handleRequestAccount(request, env);
+    if (path === "/auth/request-info" && request.method === "GET") return handleRequestInfo(request, env);
+    if (path === "/auth/accept-request" && request.method === "POST") return handleAcceptRequest(request, env);
     if (path === "/auth/users" && request.method === "GET") return handleAuthUsers(request, env);
     if (path === "/auth/bootstrap" && request.method === "POST") return handleAuthBootstrap(request, env);
 
@@ -1298,6 +1491,9 @@ export default {
 
     const userDeleteAuthMatch = path.match(/^\/auth\/users\/([^/]+)$/);
     if (userDeleteAuthMatch && request.method === "DELETE") return handleAuthDeleteUser(request, env, userDeleteAuthMatch[1]);
+
+    const reqDeclineMatch = path.match(/^\/auth\/requests\/([^/]+)$/);
+    if (reqDeclineMatch && request.method === "DELETE") return handleDeclineRequest(request, env, reqDeclineMatch[1]);
 
     return json({ error: "not found" }, 404);
   },

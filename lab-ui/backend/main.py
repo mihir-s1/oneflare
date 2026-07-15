@@ -88,6 +88,16 @@ class AuthRoleRequest(BaseModel):
 class AuthBootstrapRequest(BaseModel):
     email: str
 
+
+class AccountRequestReq(BaseModel):
+    name: str = ""
+    email: str
+
+
+class AcceptRequestReq(BaseModel):
+    token: str
+    role: str = "user"
+
 SCRIPTS_DIR = Path("/app/attack-scripts")
 
 SCENARIO_SCRIPTS = {
@@ -752,6 +762,29 @@ def auth_invite_info(request: Request, token: str = Query(...)):
 @app.post("/api/auth/accept-invite")
 def auth_accept_invite(request: Request, body: AuthAcceptInviteRequest):
     return _proxy_auth(request, "POST", "/auth/accept-invite", body.dict())
+
+
+# Self-service account requests. request-account is PUBLIC (a logged-out visitor,
+# already past Cloudflare Access, asks for a console account) — the relay gates the
+# rest on an admin session. Cookies are forwarded either way (harmless when absent).
+@app.post("/api/auth/request-account")
+def auth_request_account(request: Request, body: AccountRequestReq):
+    return _proxy_auth(request, "POST", "/auth/request-account", body.dict())
+
+
+@app.get("/api/auth/request-info")
+def auth_request_info(request: Request, token: str = Query(...)):
+    return _proxy_auth(request, "GET", f"/auth/request-info?token={quote(token, safe='')}")
+
+
+@app.post("/api/auth/accept-request")
+def auth_accept_request(request: Request, body: AcceptRequestReq):
+    return _proxy_auth(request, "POST", "/auth/accept-request", body.dict())
+
+
+@app.delete("/api/auth/requests/{token}")
+def auth_decline_request(request: Request, token: str):
+    return _proxy_auth(request, "DELETE", f"/auth/requests/{quote(token, safe='')}")
 
 
 @app.get("/api/auth/users")

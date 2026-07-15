@@ -8,8 +8,9 @@
 // discreet footer link in Settings.
 import { useState, useEffect, useRef, useCallback } from 'react'
 import { useNavigate } from 'react-router-dom'
-import { CircleUser, LogOut, ShieldCheck, RefreshCw, X } from 'lucide-react'
+import { CircleUser, LogOut, ShieldCheck, RefreshCw, X, UserPlus } from 'lucide-react'
 import { getMe } from '../lib/session'
+import RequestAccountForm from './RequestAccountForm'
 
 function RoleBadge({ role }) {
   const styles = role === 'admin'
@@ -101,6 +102,7 @@ export default function AccountMenu() {
   const [adminEnabled, setAdminEnabled] = useState(false)
   const [loaded, setLoaded] = useState(false)
   const [showSwitch, setShowSwitch] = useState(false)
+  const [showRequest, setShowRequest] = useState(false)
 
   const load = useCallback(async () => {
     const [meData, cfg] = await Promise.all([
@@ -119,7 +121,7 @@ export default function AccountMenu() {
   // elsewhere (e.g. another tab) are reflected.
   useEffect(() => {
     if (open) load()
-    if (!open) setShowSwitch(false)
+    if (!open) { setShowSwitch(false); setShowRequest(false) }
   }, [open, load])
 
   // Close on outside click / Escape.
@@ -235,12 +237,35 @@ export default function AccountMenu() {
                 </button>
               </div>
             </>
+          ) : showRequest ? (
+            <>
+              <div className="flex items-center justify-between px-1 pb-2 mb-1 border-b border-[#2d1b4e]">
+                <p className="text-xs font-semibold text-slate-300">Request an account</p>
+                <button
+                  onClick={() => setShowRequest(false)}
+                  aria-label="Back to sign in"
+                  className="text-slate-500 hover:text-slate-300 shrink-0"
+                >
+                  <X className="w-3 h-3" />
+                </button>
+              </div>
+              <RequestAccountForm compact onCancel={() => setShowRequest(false)} />
+            </>
           ) : (
             <>
               <p className="text-xs font-semibold text-slate-300 px-1 pb-2 mb-1 border-b border-[#2d1b4e]">
                 Sign in
               </p>
               <InlineLoginForm />
+              <div className="mt-2 pt-2 border-t border-[#2d1b4e]">
+                <button
+                  onClick={() => setShowRequest(true)}
+                  className="w-full flex items-center gap-2 px-2 py-1.5 rounded-lg text-sm text-slate-300 hover:text-slate-100 hover:bg-white/5 transition-colors"
+                >
+                  <UserPlus className="w-3.5 h-3.5 shrink-0" />
+                  Request an account
+                </button>
+              </div>
             </>
           )}
         </div>
