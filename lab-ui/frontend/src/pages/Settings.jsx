@@ -385,12 +385,12 @@ function LabIdentitySection({ serverConfig }) {
 
         <form onSubmit={handleRegister} className="space-y-4">
           <Field
-            label="Display Name"
+            label="Subdomain"
             fieldKey="lab_name"
             value={name}
             onChange={(_, v) => setName(v)}
             placeholder="e.g. alice"
-            note="Letters, numbers, and hyphens only — becomes the subdomain label."
+            note="Letters, numbers, and hyphens only — becomes your lab subdomain (<name>.lab.soledrop.co)."
           />
           <Field
             label="S1 HEC Ingest URL"

@@ -893,6 +893,59 @@ async function handleAuthInvite(request, env) {
   return json({ ok: true, invite_url, email, role, expires_at: row.expires_at });
 }
 
+// Bulk invite: a delimited list (or array) of emails → N invites in one shot.
+// Skips emails that already have an account. Returns per-email {status, invite_url}.
+async function handleAuthInviteBulk(request, env) {
+  const gate = await requireAuthGate(request, env);
+  if (gate.error) return gate.error;
+  if (request.method !== "POST") return json({ error: "method not allowed" }, 405);
+
+  let body;
+  try {
+    body = await request.json();
+  } catch {
+    return json({ error: "invalid JSON body" }, 400);
+  }
+  const role = body && ROLES.includes(body.role) ? body.role : "user";
+  const rawEmails = Array.isArray(body && body.emails)
+    ? body.emails
+    : String((body && body.emails) || "").split(/[\s,;]+/);
+  const emails = [...new Set(rawEmails.map(normEmail).filter(Boolean))];
+  if (!emails.length) return json({ error: "no valid emails provided" }, 400);
+
+  // Pre-load pending invites once so a re-run doesn't mint duplicate tokens for
+  // people already invited-but-not-yet-accepted; return their existing link.
+  const pending = new Map();
+  for (const inv of await listInvites(env)) {
+    if (!isExpired(inv.expires_at)) pending.set(normEmail(inv.email), inv);
+  }
+
+  const results = [];
+  for (const email of emails) {
+    if (await getAdminUser(env, email)) {
+      results.push({ email, status: "exists" });
+      continue;
+    }
+    const existing = pending.get(email);
+    if (existing) {
+      results.push({
+        email, status: "pending", role: existing.role,
+        invite_url: `${ADMIN_CONSOLE_ORIGIN}/admin/accept-invite?token=${existing.token}`,
+        expires_at: existing.expires_at,
+      });
+      continue;
+    }
+    const { token, row } = await createInvite(env, email, role, gate.auth.email);
+    await appendHistory(env, { type: "invite_created", email, role, invited_by: gate.auth.email || "admin_token" });
+    results.push({
+      email, status: "invited", role,
+      invite_url: `${ADMIN_CONSOLE_ORIGIN}/admin/accept-invite?token=${token}`,
+      expires_at: row.expires_at,
+    });
+  }
+  return json({ ok: true, count: results.length, results });
+}
+
 async function handleAuthAcceptInvite(request, env) {
   if (request.method !== "POST") return json({ error: "method not allowed" }, 405);
   let body;
@@ -1127,6 +1180,7 @@ export default {
     if (path === "/auth/logout" && request.method === "POST") return handleAuthLogout(request, env);
     if (path === "/auth/me" && request.method === "GET") return handleAuthMe(request, env);
     if (path === "/auth/invite" && request.method === "POST") return handleAuthInvite(request, env);
+    if (path === "/auth/invite-bulk" && request.method === "POST") return handleAuthInviteBulk(request, env);
     if (path === "/auth/accept-invite" && request.method === "POST") return handleAuthAcceptInvite(request, env);
     if (path === "/auth/users" && request.method === "GET") return handleAuthUsers(request, env);
     if (path === "/auth/bootstrap" && request.method === "POST") return handleAuthBootstrap(request, env);

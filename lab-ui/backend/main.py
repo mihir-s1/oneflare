@@ -70,6 +70,11 @@ class AuthInviteRequest(BaseModel):
     role: str
 
 
+class AuthInviteBulkRequest(BaseModel):
+    emails: Union[str, list] = ""     # delimited string or list of emails
+    role: str = "user"
+
+
 class AuthAcceptInviteRequest(BaseModel):
     token: str
     password: str
@@ -672,6 +677,11 @@ def auth_me(request: Request):
 @app.post("/api/auth/invite")
 def auth_invite(request: Request, body: AuthInviteRequest):
     return _proxy_auth(request, "POST", "/auth/invite", body.dict())
+
+
+@app.post("/api/auth/invite-bulk")
+def auth_invite_bulk(request: Request, body: AuthInviteBulkRequest):
+    return _proxy_auth(request, "POST", "/auth/invite-bulk", body.dict())
 
 
 @app.post("/api/auth/accept-invite")
