@@ -18,17 +18,21 @@ if not TLS_VERIFY:
     except Exception:
         pass
 
-# one-flare.com is the live attack surface (shop/portal/api.one-flare.com are
-# Cloudflare-proxied with WAF + Bot Management + Logpush → S1). Guard against an
-# empty env value (the backend may pass CLOUDFLARE_DOMAIN="") so URLs never
-# collapse to "https://shop." — fall back to the live domain instead.
-DOMAIN = os.getenv("CLOUDFLARE_DOMAIN") or "one-flare.com"
+# The live lab surface is the single soledrop shop worker (post-CTF-cutover): ONE
+# host serves the shop/portal/api paths, and the old shop|portal|api.one-flare.com
+# hosts no longer resolve (NXDOMAIN). An explicit *_URL_OVERRIDE (set by the lab-ui
+# backend from the effective server/client config) or a custom CLOUDFLARE_DOMAIN
+# still wins; with neither set, fall back to that one live host.
+DOMAIN = os.getenv("CLOUDFLARE_DOMAIN") or ""
+_REF_TARGET = os.getenv("LAB_REF_TARGET_URL") or "https://shop.soledrop.co"
 
-# Target URLs. An explicit *_URL_OVERRIDE (set by the lab-ui backend from the
-# effective server/client config) wins; otherwise derive from the domain.
-# workers.dev fallback uses the novamind-* worker names that cloudflare/setup.sh
-# deploys; a custom domain uses shop|portal|api.<domain>.
+# Target URLs. An explicit *_URL_OVERRIDE wins; otherwise derive from the domain.
+# No custom domain → the single live reference host. workers.dev uses the
+# novamind-* worker names cloudflare/setup.sh deploys; a custom domain uses
+# shop|portal|api.<domain>.
 def _derive_url(svc_workers: str, svc_custom: str) -> str:
+    if not DOMAIN:
+        return _REF_TARGET
     if "workers.dev" in DOMAIN:
         return f"https://{svc_workers}.{DOMAIN}"
     return f"https://{svc_custom}.{DOMAIN}"

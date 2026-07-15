@@ -126,6 +126,14 @@ SCENARIO_SCRIPTS = {
 # ---------------------------------------------------------------------------
 def build_server_config() -> dict:
     domain = os.getenv("LAB_CF_DOMAIN") or "one-flare.com"
+    # Default attack target for the shared reference console. Post-CTF-cutover the
+    # live lab surface is the single soledrop shop worker — ONE host serves the
+    # shop/portal/api paths (see the multi-tenant relay design), and the old
+    # shop|portal|api.one-flare.com hosts no longer resolve (NXDOMAIN). So the
+    # baked default points all three services at that one live host; each remains
+    # individually env-overridable (LAB_SHOP_URL / LAB_PORTAL_URL / LAB_API_URL)
+    # so a partner can retarget their own deployment.
+    ref_target = os.getenv("LAB_REF_TARGET_URL") or "https://shop.soledrop.co"
     def _f(name, default):
         try:
             return float(os.getenv(name, default))
@@ -133,9 +141,9 @@ def build_server_config() -> dict:
             return float(default)
     return {
         "domain": domain,
-        "shop_url":   os.getenv("LAB_SHOP_URL")   or f"https://shop.{domain}",
-        "portal_url": os.getenv("LAB_PORTAL_URL") or f"https://portal.{domain}",
-        "api_url":    os.getenv("LAB_API_URL")    or f"https://api.{domain}",
+        "shop_url":   os.getenv("LAB_SHOP_URL")   or ref_target,
+        "portal_url": os.getenv("LAB_PORTAL_URL") or ref_target,
+        "api_url":    os.getenv("LAB_API_URL")    or ref_target,
         "gateway_doh_url": os.getenv("LAB_GATEWAY_DOH_URL", ""),
         "delay":  _f("LAB_ATTACK_DELAY", "0.5"),
         "jitter": _f("LAB_ATTACK_JITTER", "0.3"),
