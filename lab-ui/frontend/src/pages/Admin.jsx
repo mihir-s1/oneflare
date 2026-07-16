@@ -27,16 +27,6 @@ function hecHost(url) {
   }
 }
 
-// The relay redacts the HEC token to a long run of asterisks + a short tail
-// (e.g. "****************M/NH"). Showing the full mask is useless and, in a
-// fixed-width column, pushes the actual destination host out of view. Collapse
-// it to just the identifying tail.
-function tokenTail(tok) {
-  if (!tok) return '—'
-  const tail = tok.replace(/^[*•]+/, '')
-  return tail ? `…${tail}` : '••••'
-}
-
 // The destination host to show: the operator's S1 console ("purple") domain if
 // they provided one, else the region ingest host (all we can infer otherwise).
 function destHost(entry) {
@@ -167,7 +157,10 @@ function LoginForm({ onLoggedIn }) {
 }
 
 // ── Tenants table ─────────────────────────────────────────────────────────────
-const TENANTS_GRID_COLS = 'grid-cols-[auto_1fr_1fr_1fr_auto_auto_auto_1.2fr_auto]'
+// EXPLICIT widths so the header grid and each row grid line up (with `auto`/`fr`
+// the two grids size independently and headers drift off their columns).
+// checkbox | Name | Subdomain | Owner | Status | Forwarded | Last Seen | S1 Dest | Actions
+const TENANTS_GRID_COLS = 'grid-cols-[2rem_minmax(6rem,1fr)_minmax(10rem,1.4fr)_minmax(9rem,1.1fr)_5.5rem_5rem_11rem_minmax(11rem,1.4fr)_15rem]'
 
 // Shared, EXPLICIT column widths for the Users + Invites tables. The header and
 // each row are separate grids, so `auto` columns would size independently and the
@@ -199,7 +192,7 @@ function TenantsTable({ rows, onToggle, onDelete, actionBusy, selected, onToggle
   return (
     <div className="rounded-xl border border-[#2d1b4e] overflow-hidden">
       <div className="overflow-x-auto">
-        <div className="min-w-[1000px]">
+        <div className="min-w-[1200px]">
           {/* Table header */}
           <div className={`grid ${TENANTS_GRID_COLS} gap-4 px-5 py-3 bg-[#1a0a2e] border-b border-[#2d1b4e] text-xs font-semibold text-slate-500 uppercase tracking-wider items-center`}>
             <input
@@ -217,7 +210,7 @@ function TenantsTable({ rows, onToggle, onDelete, actionBusy, selected, onToggle
             <span>Forwarded</span>
             <span>Last Seen</span>
             <span>S1 Destination</span>
-            <span>Actions</span>
+            <span className="text-right">Actions</span>
           </div>
 
           {rows.map((entry) => {
@@ -269,9 +262,6 @@ function TenantsTable({ rows, onToggle, onDelete, actionBusy, selected, onToggle
                     </div>
                     <div className="text-slate-400 truncate" title={entry.s1_console_url || entry.s1_hec_url || ''}>
                       {destHost(entry)}
-                    </div>
-                    <div className="text-slate-600 truncate" title="HEC token (redacted)">
-                      token {tokenTail(entry.s1_hec_token)}
                     </div>
                   </div>
                 )}
