@@ -169,6 +169,14 @@ function LoginForm({ onLoggedIn }) {
 // ── Tenants table ─────────────────────────────────────────────────────────────
 const TENANTS_GRID_COLS = 'grid-cols-[auto_1fr_1fr_1fr_auto_auto_auto_1.2fr_auto]'
 
+// Shared, EXPLICIT column widths for the Users + Invites tables. The header and
+// each row are separate grids, so `auto` columns would size independently and the
+// header labels would drift off their data columns — fixed widths keep them aligned.
+// Email | Role | Created | Last Login | Actions.
+const USERS_GRID_COLS = 'grid-cols-[minmax(9rem,1fr)_6rem_11rem_11rem_9.5rem]'
+// Pending invite | Role | Expires.
+const INVITES_GRID_COLS = 'grid-cols-[minmax(9rem,1fr)_6rem_11rem]'
+
 function TenantsTable({ rows, onToggle, onDelete, actionBusy, selected, onToggleSelect, onToggleSelectAll, readOnly }) {
   if (rows.length === 0) {
     return (
@@ -735,19 +743,19 @@ function UsersTab({ role }) {
 
       <div className="rounded-xl border border-[#2d1b4e] overflow-hidden">
         <div className="overflow-x-auto">
-          <div className="min-w-[640px]">
-            <div className="grid grid-cols-[1fr_auto_auto_auto_auto] gap-4 px-5 py-3 bg-[#1a0a2e] border-b border-[#2d1b4e] text-xs font-semibold text-slate-500 uppercase tracking-wider items-center">
+          <div className="min-w-[760px]">
+            <div className={`grid ${USERS_GRID_COLS} gap-4 px-5 py-3 bg-[#1a0a2e] border-b border-[#2d1b4e] text-xs font-semibold text-slate-500 uppercase tracking-wider items-center`}>
               <span>Email</span>
               <span>Role</span>
               <span>Created</span>
               <span>Last Login</span>
-              <span>Actions</span>
+              <span className="text-right">Actions</span>
             </div>
             {users.length === 0 && (
               <div className="px-5 py-6 text-sm text-slate-500">No admin users yet.</div>
             )}
             {users.map((u) => (
-              <div key={u.email} className="grid grid-cols-[1fr_auto_auto_auto_auto] gap-4 px-5 py-3.5 border-b border-[#1e1235] last:border-0 items-center">
+              <div key={u.email} className={`grid ${USERS_GRID_COLS} gap-4 px-5 py-3.5 border-b border-[#1e1235] last:border-0 items-center`}>
                 <span className="text-sm font-mono text-slate-200 truncate">{u.email}</span>
                 <RoleBadge role={u.role} />
                 <span className="text-xs font-mono text-slate-500 whitespace-nowrap">{formatTime(u.created_at)}</span>
@@ -786,7 +794,7 @@ function UsersTab({ role }) {
       <div className="rounded-xl border border-[#2d1b4e] overflow-hidden">
         <div className="overflow-x-auto">
           <div className="min-w-[480px]">
-            <div className="grid grid-cols-[1fr_auto_auto] gap-4 px-5 py-3 bg-[#1a0a2e] border-b border-[#2d1b4e] text-xs font-semibold text-slate-500 uppercase tracking-wider items-center">
+            <div className={`grid ${INVITES_GRID_COLS} gap-4 px-5 py-3 bg-[#1a0a2e] border-b border-[#2d1b4e] text-xs font-semibold text-slate-500 uppercase tracking-wider items-center`}>
               <span>Pending invite</span>
               <span>Role</span>
               <span>Expires</span>
@@ -795,7 +803,7 @@ function UsersTab({ role }) {
               <div className="px-5 py-6 text-sm text-slate-500">No pending invites.</div>
             )}
             {invites.map((i) => (
-              <div key={i.email} className="grid grid-cols-[1fr_auto_auto] gap-4 px-5 py-3.5 border-b border-[#1e1235] last:border-0 items-center">
+              <div key={i.email} className={`grid ${INVITES_GRID_COLS} gap-4 px-5 py-3.5 border-b border-[#1e1235] last:border-0 items-center`}>
                 <span className="text-sm font-mono text-slate-300 truncate">{i.email}</span>
                 <RoleBadge role={i.role} />
                 <span className="text-xs font-mono text-slate-500 whitespace-nowrap">{formatTime(i.expires_at)}</span>
