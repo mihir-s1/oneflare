@@ -1,7 +1,7 @@
 import { useState, useEffect } from 'react'
 import { Link } from 'react-router-dom'
 import {
-  ArrowRight, Server, Shield, Database, Globe, Cpu, AlertCircle,
+  ArrowRight, Server, Shield, Database, Globe, Cpu,
   ChevronDown, ChevronUp, Copy, Check, Info, FileCode, CheckCircle,
   LayoutDashboard, Workflow, Plug, Terminal as TerminalIcon,
 } from 'lucide-react'
@@ -625,18 +625,6 @@ export default function Architecture() {
               </div>
             </div>
           ))}
-        </div>
-      </div>
-
-      {/* Logpush note */}
-      <div className="rounded-xl border border-yellow-500/20 bg-yellow-500/5 p-4 flex gap-3">
-        <AlertCircle className="w-5 h-5 text-yellow-400 shrink-0 mt-0.5" />
-        <div>
-          <p className="text-sm font-semibold text-yellow-300 mb-1">Logpush Configuration Required</p>
-          <p className="text-sm text-slate-400 leading-relaxed">
-            For detections to flow from Cloudflare to SentinelOne, configure a Logpush job in your Cloudflare dashboard:
-            <strong className="text-slate-300"> Analytics → Logpush → Create job</strong>. Select HTTP Requests, Firewall Events, Gateway DNS, and Access Audit logs. Set the destination to your SentinelOne HTTP input endpoint.
-          </p>
         </div>
       </div>
 
