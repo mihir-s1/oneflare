@@ -149,7 +149,7 @@ function GateScreen({ kind }) {
 
 // ── Step 1: Configure ────────────────────────────────────────────────────────
 
-function ConnectedBanner({ config, onRevalidate, onEdit, onDisconnect, disconnecting }) {
+function ConnectedBanner({ config, onSelectDatasets, onRevalidate, onEdit, onDisconnect, disconnecting }) {
   return (
     <div className="space-y-4">
       <div className="rounded-xl border border-green-500/25 bg-green-500/5 p-4 flex items-start gap-3">
@@ -174,7 +174,10 @@ function ConnectedBanner({ config, onRevalidate, onEdit, onDisconnect, disconnec
         </div>
       </div>
       <div className="flex flex-wrap items-center gap-2">
-        <button onClick={onRevalidate} className="btn-primary text-xs">
+        <button onClick={onSelectDatasets} className="btn-primary text-xs">
+          <ServerCog className="w-3.5 h-3.5" /> Select datasets
+        </button>
+        <button onClick={onRevalidate} className="btn-ghost text-xs">
           <RefreshCw className="w-3.5 h-3.5" /> Re-validate
         </button>
         <button onClick={onEdit} className="btn-ghost text-xs">
@@ -701,6 +704,35 @@ export default function DeployKnowledgeObjects() {
     runValidate()
   }
 
+  // "Select datasets" from the connected banner: validate silently (needed to know
+  // capabilities), then jump straight to Select on success — no separate step click.
+  async function goToSelectDatasets() {
+    setStep('validate')
+    setValidating(true)
+    setValidateError('')
+    try {
+      const res = await fetch('/api/deploy/validate', { method: 'POST' })
+      if (res.status === 401) { setGate('signin'); return }
+      const rawText = await res.text()
+      let data = {}
+      try { data = JSON.parse(rawText) } catch { /* non-JSON body */ }
+      if (!res.ok) { setValidateError(describeHttpError(res.status, data, rawText, 'Validation')); return }
+      setValidateResult(data)
+      const caps = data?.capabilities || {}
+      const next = new Set()
+      for (const group of KNOWLEDGE_OBJECT_GROUPS) {
+        if (!caps[CAP_KEY[group.type]]) continue
+        for (const item of group.items) next.add(idFor(group.type, item.key))
+      }
+      setSelected(next)
+      setStep('select')
+    } catch {
+      setValidateError('Could not reach backend.')
+    } finally {
+      setValidating(false)
+    }
+  }
+
   function goToSelect() {
     const caps = validateResult?.capabilities || {}
     const next = new Set()
@@ -803,15 +835,15 @@ export default function DeployKnowledgeObjects() {
             <Rocket className="w-5 h-5 text-orange-400" />
           </div>
           <div className="min-w-0">
-            <h2 className="text-sm font-bold text-slate-100">Deploy to your SentinelOne console</h2>
+            <h2 className="text-sm font-bold text-slate-100">Add detections, workflows, and dashboards to console</h2>
             <p className="text-xs text-slate-400 mt-0.5">
-              Push these detections, workflows, and dashboards to your own S1 site.
+              Deploy the lab's knowledge objects to your own SentinelOne site.
             </p>
           </div>
         </div>
         <button onClick={() => setOpen(true)} className="btn-primary shrink-0">
           <Rocket className="w-4 h-4" />
-          Deploy
+          Add to console
         </button>
       </div>
 
@@ -859,6 +891,7 @@ export default function DeployKnowledgeObjects() {
                 ) : (
                   <ConnectedBanner
                     config={config}
+                    onSelectDatasets={goToSelectDatasets}
                     onRevalidate={goToValidate}
                     onEdit={() => setEditing(true)}
                     onDisconnect={handleDisconnect}
