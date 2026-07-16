@@ -56,6 +56,24 @@ function hostOf(url) {
   try { return new URL(url).host } catch { return url }
 }
 
+// Turn an HTTP error into an actionable message: prefer the backend's own
+// error/detail, else surface a trimmed snippet of the raw body (strips HTML from
+// edge/Access/WAF blocks), plus a hint for common statuses.
+function describeHttpError(status, data, rawText, verb = 'Request') {
+  const detail = (data && (data.error || (typeof data.detail === 'string' ? data.detail : null))) || ''
+  const snippet = !detail && rawText
+    ? rawText.replace(/<[^>]+>/g, ' ').replace(/\s+/g, ' ').trim().slice(0, 220)
+    : ''
+  const hints = {
+    403: 'Permission denied. If you used a scoped service-user token, its role may be missing a required write permission — deploying needs STAR Custom Rules, Hyperautomation, and (for dashboards) SDL Dashboards + SDL Configuration Files. If it persists after a page reload, your Cloudflare Access session may have expired — reload and sign in again.',
+    502: 'The backend could not reach your SentinelOne console — check the Console URL and that the token is valid.',
+    500: 'The backend hit an unexpected error while deploying.',
+  }
+  const hint = hints[status] || ''
+  const lead = detail || snippet || `${verb} failed`
+  return `${lead} (HTTP ${status})${hint ? ` — ${hint}` : ''}`
+}
+
 // ── Small shared bits ───────────────────────────────────────────────────────
 
 function Stepper({ activeId }) {
@@ -620,9 +638,11 @@ export default function DeployKnowledgeObjects() {
         body: JSON.stringify(body),
       })
       if (res.status === 401) { setGate('signin'); return }
-      const data = await res.json().catch(() => ({}))
+      const rawText = await res.text()
+      let data = {}
+      try { data = JSON.parse(rawText) } catch { /* non-JSON body */ }
       if (!res.ok) {
-        setSaveError(data.error || data.detail || `Failed to save (HTTP ${res.status})`)
+        setSaveError(describeHttpError(res.status, data, rawText, 'Save'))
         return
       }
       setConfig(data)
@@ -661,9 +681,11 @@ export default function DeployKnowledgeObjects() {
     try {
       const res = await fetch('/api/deploy/validate', { method: 'POST' })
       if (res.status === 401) { setGate('signin'); return }
-      const data = await res.json().catch(() => ({}))
+      const rawText = await res.text()
+      let data = {}
+      try { data = JSON.parse(rawText) } catch { /* non-JSON body */ }
       if (!res.ok) {
-        setValidateError(data.error || data.detail || `Validation failed (HTTP ${res.status})`)
+        setValidateError(describeHttpError(res.status, data, rawText, 'Validation'))
         return
       }
       setValidateResult(data)
@@ -744,14 +766,16 @@ export default function DeployKnowledgeObjects() {
         body: JSON.stringify({ objects }),
       })
       if (res.status === 401) { setGate('signin'); return }
-      const data = await res.json().catch(() => ({}))
+      const rawText = await res.text()
+      let data = {}
+      try { data = JSON.parse(rawText) } catch { /* non-JSON body (edge / Access / proxy) */ }
       if (!res.ok) {
-        setDeployError(data.error || data.detail || `Deploy failed (HTTP ${res.status})`)
+        setDeployError(describeHttpError(res.status, data, rawText, 'Deploy'))
         return
       }
       setDeployResults(data.results || [])
     } catch {
-      setDeployError('Could not reach backend.')
+      setDeployError('Could not reach the backend — check your connection and try again.')
     } finally {
       setDeploying(false)
       setDeployPhase('')
