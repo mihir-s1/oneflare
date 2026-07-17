@@ -3,24 +3,27 @@ import { ArrowRight, ChevronRight } from 'lucide-react'
 import Badge from './Badge.jsx'
 
 const CATEGORY_GLOW = {
-  WAF:     'card-hover-orange',
-  Access:  'card-hover-purple',
-  Gateway: 'hover:border-blue-500/40 hover:shadow-[0_0_0_1px_rgba(59,130,246,0.2),0_4px_24px_rgba(59,130,246,0.12)] transition-all duration-300 hover:-translate-y-0.5',
-  Workers: 'hover:border-red-500/40 hover:shadow-[0_0_0_1px_rgba(239,68,68,0.2),0_4px_24px_rgba(239,68,68,0.12)] transition-all duration-300 hover:-translate-y-0.5',
+  WAF:      'card-hover-orange',
+  Access:   'card-hover-purple',
+  Gateway:  'hover:border-blue-500/40 hover:shadow-[0_0_0_1px_rgba(59,130,246,0.2),0_4px_24px_rgba(59,130,246,0.12)] transition-all duration-300 hover:-translate-y-0.5',
+  Workers:  'hover:border-red-500/40 hover:shadow-[0_0_0_1px_rgba(239,68,68,0.2),0_4px_24px_rgba(239,68,68,0.12)] transition-all duration-300 hover:-translate-y-0.5',
+  Campaign: 'hover:border-pink-500/40 hover:shadow-[0_0_0_1px_rgba(236,72,153,0.2),0_4px_24px_rgba(236,72,153,0.12)] transition-all duration-300 hover:-translate-y-0.5',
 }
 
 const CATEGORY_ICON_BG = {
-  WAF:     'bg-orange-500/10 border-orange-500/20',
-  Access:  'bg-purple-500/10 border-purple-500/20',
-  Gateway: 'bg-blue-500/10 border-blue-500/20',
-  Workers: 'bg-red-500/10 border-red-500/20',
+  WAF:      'bg-orange-500/10 border-orange-500/20',
+  Access:   'bg-purple-500/10 border-purple-500/20',
+  Gateway:  'bg-blue-500/10 border-blue-500/20',
+  Workers:  'bg-red-500/10 border-red-500/20',
+  Campaign: 'bg-pink-500/10 border-pink-500/20',
 }
 
 const CATEGORY_ACCENT = {
-  WAF:     'text-orange-400',
-  Access:  'text-purple-400',
-  Gateway: 'text-blue-400',
-  Workers: 'text-red-400',
+  WAF:      'text-orange-400',
+  Access:   'text-purple-400',
+  Gateway:  'text-blue-400',
+  Workers:  'text-red-400',
+  Campaign: 'text-pink-400',
 }
 
 export default function ScenarioCard({ scenario }) {
@@ -45,8 +48,8 @@ export default function ScenarioCard({ scenario }) {
         <div className="flex items-center gap-2.5">
           <span className={`
             inline-flex items-center justify-center w-8 h-8 rounded-lg text-xs font-mono font-bold
-            border ${CATEGORY_ICON_BG[scenario.category]}
-            ${CATEGORY_ACCENT[scenario.category]}
+            border ${CATEGORY_ICON_BG[scenario.category] || CATEGORY_ICON_BG.WAF}
+            ${CATEGORY_ACCENT[scenario.category] || CATEGORY_ACCENT.WAF}
           `}>
             {scenario.number}
           </span>
@@ -70,7 +73,7 @@ export default function ScenarioCard({ scenario }) {
         <span className="text-xs text-slate-500 font-mono truncate max-w-[60%]" title={scenario.target}>
           {scenario.target}
         </span>
-        <span className={`flex items-center gap-1 text-xs font-semibold ${CATEGORY_ACCENT[scenario.category]} group-hover:gap-2 transition-all`}>
+        <span className={`flex items-center gap-1 text-xs font-semibold ${CATEGORY_ACCENT[scenario.category] || CATEGORY_ACCENT.WAF} group-hover:gap-2 transition-all`}>
           Explore
           <ChevronRight className="w-3.5 h-3.5" />
         </span>

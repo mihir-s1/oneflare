@@ -855,5 +855,391 @@ THRESHOLD: >=10 POSTs from same ClientIP
       triage: "SUSPICIOUS — Pending Confirmation, and LOW-CONFIDENCE without content inspection. Confirm via the app's LLM/guardrail logs (were injection strings present? did any response leak the system prompt?) before escalating. The volumetric alert is a lead, not proof.",
       recommendedResponse: "Rate-limit /api/v1/chat from the source, enable Cloudflare Firewall for AI scoring/guardrails, and review LLM output logs for leaked system-prompt or secrets. Full steps in the Response Playbook tab.",
     }
+  },
+  {
+    id: "ctf",
+    number: "09",
+    title: "Operation Drop-Day Bot Swarm",
+    shortDescription: "4-box CTF campaign: recon, polymorphic bot swarm, AI-concierge abuse + ATO, full breakout",
+    category: "Campaign",
+    categoryColor: "pink",
+    severity: "High",
+    cfProduct: "WAF · Bot Management · Firewall for AI",
+    target: "*.lab.soledrop.co (per-attendee)",
+    detectionRule: "SoleDrop CTF — Box 1–4 (5 STAR rules)",
+    tactic: "T1595.002 Active Scanning: Vulnerability Scanning",
+    overview: "A sneaker-bot operation hits the SoleDrop shop across 4 escalating boxes — drop recon, a polymorphic bot swarm, AI-concierge abuse plus account takeover, and a full multi-vector breakout. Each box's attack markers ride the URL query string or User-Agent (Cloudflare HTTP logs never carry request bodies), and one constant TLS fingerprint ties all 4 boxes to a single actor even as the User-Agent rotates on every request.",
+    howItWorks: [
+      "Box 1 — CF WAF: CF WAF managed ruleset + SQLi scanner rules (WAFSQLiAttackScore in the malicious band). BotScore low with scraper/python tags. Scanner/AIO User-Agents (Nikto, sqlmap, Nuclei, Wrath-AIO, Cybersole) across 8+ distinct recon paths from one IP.",
+      "Box 2 — Bot Mgmt: Bot Management flags a low BotScore + automation/checkout tags on all requests despite UA rotation. One TLS fingerprint is CONSTANT across every event while the swarm rotates through browsers, SDKs, AIO sneaker bots, and headless clients.",
+      "Box 3 — AI Firewall + ATO: CF Firewall for AI scores injected prompts (FirewallForAIInjectionScore) on POST /api/v1/chat; each injection also carries a marker in the query string. Credential stuffing drives a burst of /login POSTs from one origin.",
+      "Box 4 — Breakout: High WAF scores on RCE markers (Log4Shell/Spring4Shell/Struts) in the query string and User-Agent. SSRF to 169.254.169.254 and path traversal to /etc/passwd. The same origin pulls exfil endpoints 10+ times — the exfil detection's volume branch. Fingerprint from Box 2 still matches.",
+    ],
+    cfLogs: `{
+  "Action": "block",
+  "ClientIP": "104.28.153.9",
+  "SecurityRuleDescription": "WAF-RCE-Detect",
+  "WAFRCEAttackScore": "1",
+  "WAFSQLiAttackScore": "97",
+  "ClientRequestPath": "/api/v1/training-data",
+  "ClientRequestURI": "/api/v1/training-data?q=%24%7Bjndi%3Aldap...%7D",
+  "EdgeResponseStatus": 403,
+  "RayID": "d4f8a1b2c3"
+}`,
+    siemLogic: `dataSource.name='Cloudflare' http_request.url.hostname contains '.lab.soledrop.co'
+| inner join (WAF exploit hits, score<=20) with (bulk exfil pulls)
+  on src_endpoint.ip
+THRESHOLD: exploit_hits >= 2 AND exfil_hits >= 3 from same source`,
+    siemSeverity: "High",
+    siemTactic: "T1190 Exploit Public-Facing Application + T1119/T1020 Automated Collection & Exfiltration",
+    responseWorkflow: [
+      { step: 1, action: "Box 1 — CF WAF", detail: "One ClientIP hits 8+ recon paths / scanner UA in 15 min → auto-block the ClientIP in a CF WAF custom rule via API → create an S1 threat-intel IOC → page the on-call SOC analyst." },
+      { step: 2, action: "Box 2 — Bot Mgmt", detail: "Fingerprint match in S1 → enrich with CF threat-intel → block the fingerprint via a CF WAF custom rule + enable a drop-day Waiting Room on checkout. S1 Purple AI summarizes the polymorphic swarm into one threat narrative." },
+      { step: 3, action: "Box 3 — AI Firewall + ATO", detail: "Injection score high + repeat-offender fingerprint → S1 SOAR creates a high-severity incident linking Box 1+2+3 → apply a Cloudflare managed-challenge (Turnstile) to /api/v1/chat → force password reset + revoke sessions on stuffed accounts." },
+      { step: 4, action: "Box 4 — Breakout", detail: "Full SOAR playbook: (1) block source IP + fingerprint in CF Firewall → (2) S1 critical incident with the full timeline → (3) lock down checkout (Waiting Room) → (4) revoke API keys/sessions with the matching fingerprint → (5) PagerDuty critical — automated in under 90 seconds." },
+    ],
+    siem: {
+      ruleName: "SoleDrop CTF — Box 4 Breakout (exploit + exfil correlation)",
+      ruleType: "Scheduled detection",
+      queryLang: "PowerQuery 2.0 · SentinelOne SDL",
+      dataSource: "Cloudflare Logpush → OCSF (dataSource.name='Cloudflare'; datasets 'HTTP Requests' + 'Firewall events')",
+      severity: "High",
+      validated: true,
+      validationNote: "Live-validated 2026-07-10 on usea1-partners: both attacker IPs correlated with exploit_hits=52, worst_sqli/worst_rce=1 (near-certain attack), joined to 113 and 77 bulk exfil pulls. Box 1 separately validated 41/39 distinct paths vs a benign max of 4; Box 2 validated 37 distinct user-agents behind one fingerprint; Box 3 validated FirewallForAIInjectionScore=100 + 53/24 login POSTs.",
+      importance: "Any one signal here is noisy on its own — recon happens constantly, bot swarms can look like real shoppers, and exploit attempts get blocked anyway. The correlation across boxes (same source doing recon AND swarming AND exploiting AND exfiltrating) is what turns four medium-confidence signals into one high-confidence breakout finding.",
+      whyDetect: [
+        "Body-omission-aware: Cloudflare HTTP logs never carry the request body, so every rule keys on the URL query string or User-Agent — where the CTF's markers are deliberately placed.",
+        "Score-direction correct: Cloudflare's WAF attack scores are 1–99 where LOWER is worse (confirmed: attacks scored 1–10, clean traffic ~97) — the opposite of the intuitive reading.",
+        "Fingerprint-based, not UA-based: Box 2's one-fingerprint-many-user-agents signal survives UA rotation, the exact evasion the swarm relies on.",
+        "Correlation over volume: Box 4 joins WAF blocks to bulk data pulls from the same source — far higher fidelity than either alone.",
+      ],
+      query: `| inner join
+  (
+    dataSource.name='Cloudflare' dataSource.cloudflare_dataset='HTTP Requests' http_request.url.hostname contains '.lab.soledrop.co'
+    | let sqli = number(unmapped.WAFSQLiAttackScore), rce = number(unmapped.WAFRCEAttackScore)
+    | filter (sqli > 0 && sqli <= 20) || (rce > 0 && rce <= 20)
+    | group exploit_hits = count(), worst_sqli = min(sqli), worst_rce = min(rce),
+            exploit_paths = array_agg_distinct(http_request.url.path, 6)
+      by src_endpoint.ip
+    | filter exploit_hits >= 2
+  ),
+  (
+    dataSource.name='Cloudflare' http_request.url.hostname contains '.lab.soledrop.co' http_request.url.path in ('/api/v1/customers','/api/v1/training-data','/api/v1/users','/api/v1/models')
+    | group exfil_hits = count(), exfil_paths = array_agg_distinct(http_request.url.path, 5)
+      by src_endpoint.ip
+    | filter exfil_hits >= 3
+  )
+  on src_endpoint.ip
+| sort -exploit_hits
+| limit 100`,
+      queryExplained: [
+        { code: "http_request.url.hostname contains '.lab.soledrop.co'", note: "Per-attendee wildcard scope — the account also carries an unrelated Cloudflare Gateway feed under the same dataSource.name, so this filter is mandatory, not optional." },
+        { code: "number(unmapped.WAFSQLiAttackScore) ... sqli <= 20", note: "WAF scores arrive as strings; cast with number(). LOWER = worse (confirmed 1–10 on real attacks vs ~97 clean) — the opposite of the intuitive '>=90' guess." },
+        { code: "inner join ... on src_endpoint.ip", note: "Correlates the exploit-attempt subquery with the bulk-exfil subquery — the same source doing both is the high-fidelity breakout signal, not either alone." },
+      ],
+      signals: [
+        { signal: "distinct_paths >= 12 OR scanner_hits >= 5 per IP", catches: "Box 1 — recon sweep", why: "One IP enumerating dozens of sensitive paths is not producible by a real shopper." },
+        { signal: "1 TLS fingerprint, >= 6 distinct user-agents", catches: "Box 2 — polymorphic bot swarm", why: "Real clients present one stable fingerprint; a rotating-UA swarm sharing one fingerprint is the tell." },
+        { signal: "chat_hits >= 5 with FirewallForAIInjectionScore=100, or login_posts >= 8", catches: "Box 3 — concierge abuse / credential stuffing", why: "Both are volumetric floors no real user or single integration produces from one source." },
+        { signal: "exploit_hits >= 2 (score<=20) joined to exfil_hits >= 3", catches: "Box 4 — breakout", why: "Correlating exploit attempts with bulk data pulls from the same IP is far higher-fidelity than either signal alone." },
+      ],
+      mitre: [
+        { id: "T1595.002", tactic: "Reconnaissance", name: "Active Scanning: Vulnerability Scanning", url: "https://attack.mitre.org/techniques/T1595/002/" },
+        { id: "T1036.005", tactic: "Defense Evasion", name: "Masquerading: Match Legitimate Name or Location", url: "https://attack.mitre.org/techniques/T1036/005/" },
+        { id: "AML.T0051", tactic: "ATLAS ML Attack Staging", name: "LLM Prompt Injection", url: "https://atlas.mitre.org/techniques/AML.T0051" },
+        { id: "T1110.004", tactic: "Credential Access", name: "Brute Force: Credential Stuffing", url: "https://attack.mitre.org/techniques/T1110/004/" },
+        { id: "T1190", tactic: "Initial Access", name: "Exploit Public-Facing Application", url: "https://attack.mitre.org/techniques/T1190/" },
+        { id: "T1119", tactic: "Collection", name: "Automated Collection", url: "https://attack.mitre.org/techniques/T1119/" },
+      ],
+      falsePositive: {
+        finding: "None observed in live validation — benign traffic maxed at 4 distinct paths / 0 scanner hits (vs 41–44 for attackers), and every clean-traffic WAF score sampled at ~97 (vs 1–10 for confirmed attacks).",
+        rootCause: "The per-box thresholds (distinct_paths, ua_variety, chat_hits, login_posts, exploit_hits+exfil_hits) are volumetric floors set well above what a single real user or integration produces.",
+        fix: "If a legitimate high-volume integration (load test, monitoring) trips a threshold, allowlist its IP/fingerprint rather than loosening the floor — loosening degrades every box's signal.",
+      },
+      triage: "CONFIRMED — this is the capstone correlation rule; by the time exploit_hits and exfil_hits both clear their floors on one source, the individual boxes have already been corroborated by their own rules (1, 2, 3a, 3b).",
+      recommendedResponse: "Follow the per-box Response Playbook in order — early boxes (block IP, rate-limit, Waiting Room) are containment; Box 4 firing means escalate directly to a critical incident with the full 4-box timeline attached.",
+    }
+  },
+  {
+    id: "financial",
+    number: "10",
+    title: "Operation Wire Fraud",
+    shortDescription: "5-phase campaign: recon → enumeration → credential stuffing → SQLi wire-transfer fraud → Log4Shell on payment middleware",
+    category: "Campaign",
+    categoryColor: "pink",
+    severity: "Critical",
+    cfProduct: "WAF · Rate Limiting · Bot Management",
+    target: "api.<domain> — Meridian Bank",
+    detectionRule: "CF-Financial-KillChain (illustrative — not yet deployed)",
+    tactic: "T1595.002 Active Scanning: Vulnerability Scanning",
+    overview: "A sophisticated threat actor targets Meridian Bank's online banking platform to intercept wire transfers — 5 escalating phases from infrastructure recon through a Log4Shell exploit against the payment middleware, each phase correlated by AI to the same source as one coordinated kill chain.",
+    howItWorks: [
+      "Phase 1 — Initial Reconnaissance: Path traversal to financial endpoints, scanner User-Agents (sqlmap, Nmap, Nikto), admin panel probing. Cloudflare BotScore < 10.",
+      "Phase 2 — Account Enumeration: Sequential GET /api/v1/customers/10001→10050, customer email probing. Unusual sequential API access pattern.",
+      "Phase 3 — Credential Stuffing: POST /api/v1/auth/login with credential pairs, rotating source IPs per request — a distributed botnet pattern across 8+ IPs.",
+      "Phase 4 — Wire Transfer Exploitation: POST /api/wire-transfer with SQLi in the amount field, GET /api/v1/customers/export with injection. WAFSQLiAttackScore in the malicious band.",
+      "Phase 5 — Payment Middleware Exploitation: CVE-2021-44228 Log4Shell strings in User-Agent + X-Api-Version headers targeting /swift/payment.",
+    ],
+    cfLogs: `{
+  "Action": "block",
+  "ClientIP": "185.220.101.47",
+  "SecurityRuleDescription": "CVE-2021-44228 Log4Shell",
+  "WAFRCEAttackScore": "1",
+  "FirewallForAIInjectionScore": "100",
+  "ClientRequestPath": "/swift/payment",
+  "EdgeResponseStatus": 403,
+  "RayID": "f2a91c7e0b"
+}`,
+    siemLogic: `dataSource.name='Cloudflare' http_request.url.hostname contains 'api.'
+| group recon_hits, enum_hits, stuffing_hits, sqli_hits, log4shell_hits by src_endpoint.ip
+THRESHOLD: >=3 of the 5 phases from the same source within the campaign window`,
+    siemSeverity: "Critical",
+    siemTactic: "T1190 Exploit Public-Facing Application (Log4Shell CVE-2021-44228)",
+    responseWorkflow: [
+      { step: 1, action: "Initial Reconnaissance", detail: "Bot score < 10 AND requests > 20 in 5 min → auto-challenge IP at the Cloudflare edge." },
+      { step: 2, action: "Account Enumeration", detail: "Sequential API probing detected → create a medium-severity incident, rate-limit the source IP." },
+      { step: 3, action: "Credential Stuffing", detail: "Rate limit fires AND POST to /login → block the ASN, force MFA on all accounts, page SOC." },
+      { step: 4, action: "Wire Transfer Exploitation", detail: "SQLi on a financial endpoint → critical incident, freeze the affected accounts API, notify the compliance team." },
+      { step: 5, action: "Payment Middleware Exploitation", detail: "CVE signature + critical score → isolate the payment API, page the CISO, open a P1 ticket, push an emergency block rule to the Cloudflare edge." },
+    ],
+    siem: {
+      ruleName: "CF-Financial-KillChain-Correlation (illustrative)",
+      ruleType: "Scheduled detection (draft — not yet deployed or run against live data)",
+      queryLang: "PowerQuery 2.0 · SentinelOne SDL",
+      dataSource: "Cloudflare zone HTTP Requests → OCSF HTTP Activity (class_uid 4002)",
+      severity: "Critical",
+      validated: false,
+      validationNote: "Illustrative only — the financial campaign has not been run against a live tenant, so this query is authored against the verified OCSF field contract but not yet confirmed to fire. Validate with a live run before relying on it.",
+      importance: "No single phase is high-confidence alone (recon is constant noise; enumeration looks like normal API traffic; even the SQLi may just be blocked-and-forgotten). The value is in catching the SAME source progressing through multiple phases — that progression is what marks a coordinated wire-fraud campaign rather than five unrelated events.",
+      whyDetect: [
+        "Kill-chain correlation: catches the campaign even if any single phase's WAF rule is bypassed, because the other phases from the same source still corroborate it.",
+        "WAF score direction confirmed elsewhere in this lab: LOWER = worse for WAF*AttackScore fields — apply the same number() + <=20 pattern here.",
+        "Distributed credential stuffing (8+ rotating IPs) needs a JA3/fingerprint pivot, not just source IP, to tie the botnet together.",
+      ],
+      query: `dataSource.name='Cloudflare' http_request.url.hostname contains 'api.'
+| let sqli = number(unmapped.WAFSQLiAttackScore), rce = number(unmapped.WAFRCEAttackScore)
+| let is_recon = http_request.user_agent matches '(?i)(sqlmap|nmap|nikto)'
+| let is_enum  = http_request.url.path matches '/api/v1/customers/[0-9]+'
+| let is_sqli  = (sqli > 0 && sqli <= 20)
+| let is_rce   = (rce > 0 && rce <= 20)
+| group recon=count(is_recon), enum=count(is_enum), sqli_hits=count(is_sqli), rce_hits=count(is_rce),
+        first_seen=oldest(timestamp), last_seen=newest(timestamp)
+  by src_endpoint.ip
+| let phases_hit = (recon>0?1:0) + (enum>0?1:0) + (sqli_hits>0?1:0) + (rce_hits>0?1:0)
+| filter phases_hit >= 2
+| sort -phases_hit
+| limit 100`,
+      queryExplained: [
+        { code: "number(unmapped.WAFSQLiAttackScore) ... sqli <= 20", note: "Same verified pattern as the CTF rules — WAF scores are strings, and LOWER means more malicious." },
+        { code: "phases_hit = sum of phase-indicator counts", note: "Counts how many distinct attack phases a single source triggered — the kill-chain-progression signal, not any one phase's volume." },
+        { code: "filter phases_hit >= 2", note: "A conservative floor; tighten to >= 3 for a higher-confidence, lower-volume alert once tuned against real traffic." },
+      ],
+      signals: [
+        { signal: "scanner UA + path-traversal probes", catches: "Phase 1 — reconnaissance", why: "Cloudflare BotScore drops sharply on known scanner tooling." },
+        { signal: "sequential customer-ID access pattern", catches: "Phase 2 — account enumeration", why: "Real users don't request customer records in numeric sequence." },
+        { signal: "distributed POST /login burst across rotating IPs", catches: "Phase 3 — credential stuffing", why: "A shared JA3/UA fingerprint across many source IPs ties the botnet together despite IP rotation." },
+        { signal: "WAFSQLiAttackScore <= 20 on financial endpoints", catches: "Phase 4 — wire-transfer SQLi", why: "The ML score flags injection structure even on requests a signature rule might miss." },
+      ],
+      mitre: [
+        { id: "T1595.002", tactic: "Reconnaissance", name: "Active Scanning: Vulnerability Scanning", url: "https://attack.mitre.org/techniques/T1595/002/" },
+        { id: "T1110.004", tactic: "Credential Access", name: "Brute Force: Credential Stuffing", url: "https://attack.mitre.org/techniques/T1110/004/" },
+        { id: "T1190", tactic: "Initial Access", name: "Exploit Public-Facing Application", url: "https://attack.mitre.org/techniques/T1190/" },
+      ],
+      falsePositive: {
+        finding: "Not yet measured — this campaign has no live validation run.",
+        rootCause: "phases_hit >= 2 is a conservative starting floor chosen without a benign-traffic baseline.",
+        fix: "Run the campaign against a lab tenant, capture the benign phases_hit distribution, and raise the floor above it before treating this as production-ready.",
+      },
+      triage: "SUSPICIOUS — Pending Confirmation until validated live. Treat phases_hit >= 3 as high-confidence; 2 as a lead requiring manual review of the source's full request history.",
+      recommendedResponse: "Follow the per-phase Response Playbook — early phases are containment (challenge, rate-limit), Phase 4–5 firing means escalate to a critical incident and freeze the affected financial API.",
+    }
+  },
+  {
+    id: "healthcare",
+    number: "11",
+    title: "Operation HIPAA Breach",
+    shortDescription: "5-phase campaign: FHIR recon → patient enumeration → EHR credential stuffing → SQLi PHI extraction → Spring4Shell on the FHIR API",
+    category: "Campaign",
+    categoryColor: "pink",
+    severity: "Critical",
+    cfProduct: "WAF · Rate Limiting · Bot Management",
+    target: "api.<domain> — MedCore Health Systems",
+    detectionRule: "CF-Healthcare-KillChain (illustrative — not yet deployed)",
+    tactic: "T1595.002 Active Scanning: Vulnerability Scanning",
+    overview: "A criminal group targets MedCore Health Systems to steal patient PHI for sale on the dark web — 5 escalating phases from FHIR/EHR reconnaissance through a Spring4Shell exploit against the FHIR API server, each phase correlated by AI as one coordinated PHI-theft campaign.",
+    howItWorks: [
+      "Phase 1 — Healthcare System Reconnaissance: FHIR endpoint discovery, patient portal probing, HL7 interface scanning, .well-known/smart-configuration. Cloudflare BotScore very low.",
+      "Phase 2 — Patient Data Enumeration: Sequential GET /api/fhir/Patient/1001→1050, /portal/patient-search?name=Smith (surname enumeration).",
+      "Phase 3 — EHR System Credential Attack: POST /portal/login with healthcare staff usernames (dr.johnson, nurse.smith), hospital password patterns, distributed across multiple IPs.",
+      "Phase 4 — Patient Database Exploitation: SQLi on /portal/patient-search (UNION SELECT ssn,dob,diagnosis), POST /api/lab-results with injection. WAFSQLiAttackScore in the malicious band.",
+      "Phase 5 — FHIR API Zero-Day Exploitation: CVE-2022-22965 Spring4Shell in User-Agent + X-Api-Version headers on the /api/fhir/Patient endpoint.",
+    ],
+    cfLogs: `{
+  "Action": "block",
+  "ClientIP": "194.165.16.72",
+  "SecurityRuleDescription": "CVE-2022-22965 Spring4Shell",
+  "WAFRCEAttackScore": "1",
+  "FirewallForAIInjectionScore": "100",
+  "ClientRequestPath": "/api/fhir/Patient",
+  "EdgeResponseStatus": 403,
+  "RayID": "a91d8f4c2e"
+}`,
+    siemLogic: `dataSource.name='Cloudflare' http_request.url.hostname contains 'api.'
+| group fhir_recon, patient_enum, ehr_stuffing, phi_sqli, springshell by src_endpoint.ip
+THRESHOLD: >=3 of the 5 phases from the same source within the campaign window`,
+    siemSeverity: "Critical",
+    siemTactic: "T1190 Exploit Public-Facing Application (Spring4Shell CVE-2022-22965)",
+    responseWorkflow: [
+      { step: 1, action: "Healthcare System Reconnaissance", detail: "FHIR endpoint scanning pattern → alert the privacy officer, log for the HIPAA audit trail, auto-challenge the IP." },
+      { step: 2, action: "Patient Data Enumeration", detail: "Sequential patient-record access → block the IP, notify the Privacy Officer, flag for HIPAA breach assessment." },
+      { step: 3, action: "EHR System Credential Attack", detail: "Healthcare-portal credential stuffing → lock all non-MFA accounts, alert IT security, force re-authentication." },
+      { step: 4, action: "Patient Database Exploitation", detail: "SQLi on a patient-data endpoint → critical HIPAA incident, freeze the API, notify the breach-response team, start the 72-hour HIPAA clock." },
+      { step: 5, action: "FHIR API Zero-Day Exploitation", detail: "Spring4Shell on FHIR → isolate the FHIR API server, invoke the HIPAA breach-response plan, notify HHS within 72 hours, push an emergency Cloudflare block rule." },
+    ],
+    siem: {
+      ruleName: "CF-Healthcare-KillChain-Correlation (illustrative)",
+      ruleType: "Scheduled detection (draft — not yet deployed or run against live data)",
+      queryLang: "PowerQuery 2.0 · SentinelOne SDL",
+      dataSource: "Cloudflare zone HTTP Requests → OCSF HTTP Activity (class_uid 4002)",
+      severity: "Critical",
+      validated: false,
+      validationNote: "Illustrative only — the healthcare campaign has not been run against a live tenant, so this query is authored against the verified OCSF field contract but not yet confirmed to fire. Validate with a live run before relying on it.",
+      importance: "PHI theft campaigns rarely trip a single high-confidence rule — FHIR enumeration looks like normal API browsing until correlated with the credential attack and exploit phases that follow it from the same source, at which point it's a HIPAA-reportable event.",
+      whyDetect: [
+        "Kill-chain correlation across phases beats any single volumetric rule for a patient, deliberate attacker (vs an opportunistic scanner).",
+        "WAF score direction confirmed elsewhere in this lab: LOWER = worse for WAF*AttackScore fields — the same number() + <=20 pattern applies to PHI-endpoint SQLi.",
+        "Staff-naming-pattern credential stuffing (dr.*, nurse.*) suggests insider knowledge of the org — a distinct enough behavior to key on separately from generic stuffing.",
+      ],
+      query: `dataSource.name='Cloudflare' http_request.url.hostname contains 'api.'
+| let sqli = number(unmapped.WAFSQLiAttackScore), rce = number(unmapped.WAFRCEAttackScore)
+| let is_fhir_recon = http_request.url.path matches '(?i)(fhir|smart-configuration|hl7)'
+| let is_enum       = http_request.url.path matches '/api/fhir/Patient/[0-9]+'
+| let is_sqli       = (sqli > 0 && sqli <= 20)
+| let is_rce        = (rce > 0 && rce <= 20)
+| group recon=count(is_fhir_recon), enum=count(is_enum), sqli_hits=count(is_sqli), rce_hits=count(is_rce),
+        first_seen=oldest(timestamp), last_seen=newest(timestamp)
+  by src_endpoint.ip
+| let phases_hit = (recon>0?1:0) + (enum>0?1:0) + (sqli_hits>0?1:0) + (rce_hits>0?1:0)
+| filter phases_hit >= 2
+| sort -phases_hit
+| limit 100`,
+      queryExplained: [
+        { code: "http_request.url.path matches '(?i)(fhir|smart-configuration|hl7)'", note: "Flags healthcare-specific API discovery — a targeted, not opportunistic, recon signature." },
+        { code: "number(unmapped.WAFSQLiAttackScore) ... sqli <= 20", note: "Same verified pattern as the CTF rules — WAF scores are strings, and LOWER means more malicious." },
+        { code: "phases_hit = sum of phase-indicator counts", note: "Counts how many distinct attack phases a single source triggered against the healthcare API." },
+      ],
+      signals: [
+        { signal: "FHIR/HL7-specific endpoint discovery", catches: "Phase 1 — healthcare reconnaissance", why: "Targeting FHIR/SMART-configuration specifically (vs generic API probing) indicates a healthcare-focused attacker." },
+        { signal: "sequential Patient resource ID access", catches: "Phase 2 — patient data enumeration", why: "Real EHR usage doesn't walk patient IDs in sequence." },
+        { signal: "staff-naming-pattern credential stuffing (dr.*, nurse.*)", catches: "Phase 3 — EHR credential attack", why: "Suggests the attacker has insider knowledge of hospital staff naming conventions." },
+        { signal: "WAFSQLiAttackScore <= 20 on patient-search endpoints", catches: "Phase 4 — PHI extraction", why: "Flags UNION-based SSN/DOB/diagnosis extraction attempts even if blocked." },
+      ],
+      mitre: [
+        { id: "T1595.002", tactic: "Reconnaissance", name: "Active Scanning: Vulnerability Scanning", url: "https://attack.mitre.org/techniques/T1595/002/" },
+        { id: "T1110.004", tactic: "Credential Access", name: "Brute Force: Credential Stuffing", url: "https://attack.mitre.org/techniques/T1110/004/" },
+        { id: "T1190", tactic: "Initial Access", name: "Exploit Public-Facing Application", url: "https://attack.mitre.org/techniques/T1190/" },
+      ],
+      falsePositive: {
+        finding: "Not yet measured — this campaign has no live validation run.",
+        rootCause: "phases_hit >= 2 is a conservative starting floor chosen without a benign-traffic baseline.",
+        fix: "Run the campaign against a lab tenant, capture the benign phases_hit distribution, and raise the floor above it before treating this as production-ready.",
+      },
+      triage: "SUSPICIOUS — Pending Confirmation until validated live. Treat phases_hit >= 3 as high-confidence and immediately notify the Privacy Officer; 2 as a lead requiring manual review.",
+      recommendedResponse: "Follow the per-phase Response Playbook — early phases are containment (challenge, block, MFA lock), Phase 4–5 firing means invoke the HIPAA breach-response plan and start the 72-hour notification clock.",
+    }
+  },
+  {
+    id: "saas",
+    number: "12",
+    title: "Operation Tenant Escape",
+    shortDescription: "5-phase campaign: API/GraphQL recon → key extraction → privilege escalation → tenant-isolation breach → Log4Shell on backend services",
+    category: "Campaign",
+    categoryColor: "pink",
+    severity: "Critical",
+    cfProduct: "WAF · Rate Limiting · Bot Management",
+    target: "api.<domain> — CloudMatrix",
+    detectionRule: "CF-SaaS-KillChain (illustrative — not yet deployed)",
+    tactic: "T1595.002 Active Scanning: Vulnerability Scanning",
+    overview: "A competitor's hired group targets the CloudMatrix SaaS platform to steal customer tenant data and API keys — 5 escalating phases from GraphQL/API-surface recon through a Log4Shell exploit against backend services, each phase correlated by AI as one coordinated tenant-isolation-breach campaign.",
+    howItWorks: [
+      "Phase 1 — API Surface Reconnaissance: GraphQL introspection query {__schema}, OpenAPI/Swagger probing, .env discovery, /api/docs enumeration. Cloudflare BotScore very low.",
+      "Phase 2 — API Key Extraction: GET /api/v1/admin, GET /api/v1/config, SQLi on /api/v1/users?include=, X-Internal-Token header probing — multiple 403s.",
+      "Phase 3 — Privilege Escalation Attempt: POST /api/v1/admin with role manipulation, /admin/impersonate probing, JWT token forgery (alg:none), OAuth abuse.",
+      "Phase 4 — Tenant Isolation Breach Attempt: Sequential GET /api/v1/training-data?tenant_id=2001→2050 (IDOR via tenant_id), SQLi on /api/v1/billing?tenant=. WAFSQLiAttackScore in the malicious band.",
+      "Phase 5 — Backend Infrastructure Zero-Day: CVE-2021-44228 Log4Shell in User-Agent, X-Request-ID, X-Forwarded-Host headers on Java backend endpoints.",
+    ],
+    cfLogs: `{
+  "Action": "block",
+  "ClientIP": "91.108.4.0",
+  "SecurityRuleDescription": "CVE-2021-44228 Log4Shell",
+  "WAFRCEAttackScore": "1",
+  "FirewallForAIInjectionScore": "100",
+  "ClientRequestPath": "/api/v1/training-data",
+  "EdgeResponseStatus": 403,
+  "RayID": "b73e5a9d1f"
+}`,
+    siemLogic: `dataSource.name='Cloudflare' http_request.url.hostname contains 'api.'
+| group graphql_recon, key_extract, priv_esc, tenant_idor, log4shell by src_endpoint.ip
+THRESHOLD: >=3 of the 5 phases from the same source within the campaign window`,
+    siemSeverity: "Critical",
+    siemTactic: "T1190 Exploit Public-Facing Application (Log4Shell CVE-2021-44228)",
+    responseWorkflow: [
+      { step: 1, action: "API Surface Reconnaissance", detail: "GraphQL introspection + env-file probing → block the IP, disable GraphQL introspection, alert platform security." },
+      { step: 2, action: "API Key Extraction", detail: "API-key endpoint probing → rotate all API keys for the affected tenant, notify account owners, flag for review." },
+      { step: 3, action: "Privilege Escalation Attempt", detail: "Admin-endpoint probing + OAuth abuse → lock the admin API, revoke suspicious OAuth tokens, alert the IAM team." },
+      { step: 4, action: "Tenant Isolation Breach Attempt", detail: "IDOR pattern + SQLi on tenant data → critical incident, isolate the affected tenant APIs, notify all impacted customers." },
+      { step: 5, action: "Backend Infrastructure Zero-Day", detail: "Log4Shell + critical score → isolate Java services, push an emergency WAF rule to Cloudflare, page CTO + CISO, open a customer breach-notification workflow." },
+    ],
+    siem: {
+      ruleName: "CF-SaaS-KillChain-Correlation (illustrative)",
+      ruleType: "Scheduled detection (draft — not yet deployed or run against live data)",
+      queryLang: "PowerQuery 2.0 · SentinelOne SDL",
+      dataSource: "Cloudflare zone HTTP Requests → OCSF HTTP Activity (class_uid 4002)",
+      severity: "Critical",
+      validated: false,
+      validationNote: "Illustrative only — the SaaS campaign has not been run against a live tenant, so this query is authored against the verified OCSF field contract but not yet confirmed to fire. Validate with a live run before relying on it.",
+      importance: "A tenant-isolation breach is catastrophic (full cross-customer data exposure) but each individual phase looks like ordinary API exploration until correlated — GraphQL introspection alone is common from legitimate integrators, but progressing into key extraction, privilege escalation, and tenant-ID enumeration from the same source is not.",
+      whyDetect: [
+        "Kill-chain correlation catches the campaign even if the admin-endpoint probing alone isn't alert-worthy on its own.",
+        "WAF score direction confirmed elsewhere in this lab: LOWER = worse for WAF*AttackScore fields — the same number() + <=20 pattern applies to the tenant-billing SQLi.",
+        "Sequential tenant_id enumeration is an IDOR signature distinct from ordinary API usage and worth a dedicated indicator.",
+      ],
+      query: `dataSource.name='Cloudflare' http_request.url.hostname contains 'api.'
+| let sqli = number(unmapped.WAFSQLiAttackScore), rce = number(unmapped.WAFRCEAttackScore)
+| let is_graphql = http_request.url.path contains '/graphql' || http_request.url.url_string contains '__schema'
+| let is_idor    = http_request.url.path matches '/api/v1/training-data' && http_request.url.url_string matches 'tenant_id=[0-9]+'
+| let is_sqli    = (sqli > 0 && sqli <= 20)
+| let is_rce     = (rce > 0 && rce <= 20)
+| group recon=count(is_graphql), idor=count(is_idor), sqli_hits=count(is_sqli), rce_hits=count(is_rce),
+        first_seen=oldest(timestamp), last_seen=newest(timestamp)
+  by src_endpoint.ip
+| let phases_hit = (recon>0?1:0) + (idor>0?1:0) + (sqli_hits>0?1:0) + (rce_hits>0?1:0)
+| filter phases_hit >= 2
+| sort -phases_hit
+| limit 100`,
+      queryExplained: [
+        { code: "url_string contains '__schema'", note: "GraphQL introspection query signature — flags systematic API-surface mapping rather than normal client traffic." },
+        { code: "url.path matches training-data && url_string matches tenant_id=[0-9]+", note: "The IDOR signature: sequential tenant_id enumeration against a cross-tenant data endpoint." },
+        { code: "phases_hit = sum of phase-indicator counts", note: "Counts how many distinct attack phases a single source triggered against the SaaS platform." },
+      ],
+      signals: [
+        { signal: "GraphQL introspection + .env/swagger probing", catches: "Phase 1 — API surface reconnaissance", why: "Systematic schema/config discovery is not typical client behavior." },
+        { signal: "admin-endpoint probing + OAuth client_credentials abuse", catches: "Phase 3 — privilege escalation", why: "Repeated 403s on admin routes combined with OAuth grant abuse indicates active escalation attempts." },
+        { signal: "sequential tenant_id enumeration (IDOR)", catches: "Phase 4 — tenant isolation breach", why: "Walking tenant_id values in sequence is the signature of a cross-tenant access attempt." },
+        { signal: "WAFSQLiAttackScore <= 20 on billing/tenant endpoints", catches: "Phase 4 — tenant-data SQLi", why: "Flags injection against multi-tenant billing data even if blocked." },
+      ],
+      mitre: [
+        { id: "T1595.002", tactic: "Reconnaissance", name: "Active Scanning: Vulnerability Scanning", url: "https://attack.mitre.org/techniques/T1595/002/" },
+        { id: "T1078", tactic: "Defense Evasion", name: "Valid Accounts: Cloud Accounts", url: "https://attack.mitre.org/techniques/T1078/" },
+        { id: "T1190", tactic: "Initial Access", name: "Exploit Public-Facing Application", url: "https://attack.mitre.org/techniques/T1190/" },
+      ],
+      falsePositive: {
+        finding: "Not yet measured — this campaign has no live validation run.",
+        rootCause: "phases_hit >= 2 is a conservative starting floor chosen without a benign-traffic baseline; a legitimate integration partner doing GraphQL introspection could trip Phase 1 alone.",
+        fix: "Run the campaign against a lab tenant, capture the benign phases_hit distribution, allowlist known integrator IPs, and raise the floor above the benign baseline.",
+      },
+      triage: "SUSPICIOUS — Pending Confirmation until validated live. Treat phases_hit >= 3 as high-confidence tenant-isolation-breach activity; 2 as a lead requiring manual review of the source's tenant_id access pattern.",
+      recommendedResponse: "Follow the per-phase Response Playbook — early phases are containment (block, key rotation, OAuth revocation), Phase 4–5 firing means isolate the affected tenant APIs and open the customer breach-notification workflow.",
+    }
   }
 ]
