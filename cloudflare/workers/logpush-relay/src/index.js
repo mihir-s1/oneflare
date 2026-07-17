@@ -19,6 +19,7 @@
 //                                            instance to detect a teardown
 //   GET    /admin/registry                — list all tenants (admin session or ADMIN_TOKEN)
 //   GET    /admin/history                 — audit/history log (admin session or ADMIN_TOKEN)
+//   POST   /admin/audit                   — backend break-glass audit write (ADMIN_TOKEN only)
 //   POST   /admin/user/:subdomain/enable  — flip status -> active (admin role required)
 //   POST   /admin/user/:subdomain/disable — flip status -> disabled (admin role required)
 //   DELETE /admin/user/:subdomain         — teardown: delete registry row (admin role required)
@@ -40,7 +41,7 @@
 
 const LAB_DOMAIN = "lab.soledrop.co";
 const HISTORY_KEY = "__history__";
-const MAX_HISTORY = 200;
+const MAX_HISTORY = 500;
 const UNKNOWN_PREFIX = "__unknown__:";
 // Exact decompressed content of the gzip test file Cloudflare POSTs to validate
 // a generic HTTP Logpush destination. See handleIngest() for the doc citation.
@@ -760,14 +761,14 @@ async function buildTenantUpsert(env, body, ownerEmail) {
   const account = String(account_label || "").trim().slice(0, 200);
   const consoleUrl = String(s1_console_url || "").trim().slice(0, 300) || null;
   if (!name || !s1_hec_url || !s1_hec_token || !label || !account) {
-    return { error: json({
-      error: "name, s1_hec_url, s1_hec_token, site_label, and account_label are all required",
-    }, 400) };
+    const reason = "name, s1_hec_url, s1_hec_token, site_label, and account_label are all required";
+    return { error: json({ error: reason }, 400), reason };
   }
 
   const slug = slugify(name);
   if (!slug) {
-    return { error: json({ error: "name did not produce a valid subdomain slug" }, 400) };
+    const reason = "name did not produce a valid subdomain slug";
+    return { error: json({ error: reason }, 400), reason };
   }
 
   const host = `${slug}.${LAB_DOMAIN}`;
@@ -837,16 +838,27 @@ async function handleRegister(request, env) {
   }
 
   if (!checkEnrollCode(request, body, env)) {
+    await appendHistory(env, {
+      type: "site_register_failure", status: "failure", owner: null,
+      reason: "invalid or missing enroll code",
+    });
     return json({ error: "invalid or missing enroll code" }, 403);
   }
 
   // undefined owner → don't disturb an owner set via the session path.
   const built = await buildTenantUpsert(env, body, undefined);
-  if (built.error) return built.error;
+  if (built.error) {
+    await appendHistory(env, {
+      type: "site_register_failure", status: "failure", owner: null, reason: built.reason,
+    });
+    return built.error;
+  }
   const { host, row, existed } = built;
 
   await env.REGISTRY.put(host, JSON.stringify(row));
-  await appendHistory(env, { type: existed ? "re-register" : "register", subdomain: host, name: row.name });
+  await appendHistory(env, {
+    type: existed ? "re-register" : "register", status: "success", subdomain: host, name: row.name,
+  });
 
   return json({ ok: true, subdomain: host, shop_url: `https://${host}` });
 }
@@ -894,6 +906,22 @@ async function handleAdminHistory(request, env) {
   if (gate.error) return gate.error;
   const history = await getHistory(env);
   return json({ ok: true, count: history.length, history });
+}
+
+// POST /admin/audit — backend break-glass audit write (e.g. dko_deploy results
+// from lab-ui/backend). ADMIN_TOKEN only — no session path, since the backend
+// authenticates to the relay as a service, not as a logged-in console user.
+async function handleAdminAudit(request, env) {
+  if (request.method !== "POST") return json({ error: "method not allowed" }, 405);
+  if (!checkAdminToken(request, env)) return json({ error: "unauthorized" }, 401);
+  let body;
+  try {
+    body = await request.json();
+  } catch {
+    return json({ error: "invalid JSON body" }, 400);
+  }
+  await appendHistory(env, body);
+  return json({ ok: true });
 }
 
 async function handleAdminUserStatus(request, env, rawSubdomain, enable) {
@@ -945,23 +973,38 @@ async function handleAuthLogin(request, env) {
   }
   const email = normEmail(body && body.email);
   const password = String((body && body.password) || "");
-  if (!email || !password) return json({ error: "email and password are required" }, 400);
+  if (!email || !password) {
+    await appendHistory(env, { type: "login_failure", status: "failure", email, reason: "missing email or password" });
+    return json({ error: "email and password are required" }, 400);
+  }
 
   const user = await getAdminUser(env, email);
   const ok = await verifyPassword(password, user);
-  if (!ok) return json({ error: "invalid credentials" }, 401);
+  if (!ok) {
+    await appendHistory(env, { type: "login_failure", status: "failure", email, reason: "invalid credentials" });
+    return json({ error: "invalid credentials" }, 401);
+  }
 
   user.last_login = new Date().toISOString();
   await putAdminUser(env, user);
 
   const { sid } = await createSession(env, user.email, user.role);
+  await appendHistory(env, { type: "login_success", status: "success", email: user.email, role: user.role });
   return withSessionCookie(json({ ok: true, email: user.email, role: user.role }), sid);
 }
 
 async function handleAuthLogout(request, env) {
   if (request.method !== "POST") return json({ error: "method not allowed" }, 405);
   const sid = parseCookies(request)[SESSION_COOKIE];
-  if (sid) await deleteSession(env, sid);
+  let email = null;
+  if (sid) {
+    try {
+      const raw = await env.REGISTRY.get(SESSION_PREFIX + sid);
+      if (raw) email = JSON.parse(raw).email || null;
+    } catch {}
+    await deleteSession(env, sid);
+  }
+  await appendHistory(env, email ? { type: "logout", email } : { type: "logout" });
   return withClearedSessionCookie(json({ ok: true }));
 }
 
@@ -1467,18 +1510,37 @@ function ownerIdentityView(row) {
 async function handleAuthLabRegister(request, env) {
   if (request.method !== "POST") return json({ error: "method not allowed" }, 405);
   const session = await currentSession(request, env);
-  if (!session) return json({ error: "not authenticated" }, 401);
-  if (session.role === "viewer") return json({ error: "viewers cannot register a lab" }, 403);
+  if (!session) {
+    await appendHistory(env, {
+      type: "site_register_failure", status: "failure", owner: null, reason: "not authenticated",
+    });
+    return json({ error: "not authenticated" }, 401);
+  }
+  if (session.role === "viewer") {
+    await appendHistory(env, {
+      type: "site_register_failure", status: "failure", owner: session.email,
+      reason: "viewers cannot register a lab",
+    });
+    return json({ error: "viewers cannot register a lab" }, 403);
+  }
 
   let body;
   try {
     body = await request.json();
   } catch {
+    await appendHistory(env, {
+      type: "site_register_failure", status: "failure", owner: session.email, reason: "invalid JSON body",
+    });
     return json({ error: "invalid JSON body" }, 400);
   }
 
   const built = await buildTenantUpsert(env, body, session.email);
-  if (built.error) return built.error;
+  if (built.error) {
+    await appendHistory(env, {
+      type: "site_register_failure", status: "failure", owner: session.email, reason: built.reason,
+    });
+    return built.error;
+  }
   const { host, row, existed } = built;
 
   const ownerKey = OWNER_PREFIX + normEmail(session.email);
@@ -1493,7 +1555,8 @@ async function handleAuthLabRegister(request, env) {
   await env.REGISTRY.put(host, JSON.stringify(row));
   await env.REGISTRY.put(ownerKey, host);
   await appendHistory(env, {
-    type: existed ? "re-register" : "register", subdomain: host, name: row.name, owner: session.email,
+    type: existed ? "re-register" : "register", status: "success",
+    subdomain: host, name: row.name, owner: session.email,
   });
 
   return json({ ok: true, subdomain: host, shop_url: `https://${host}`, identity: ownerIdentityView(row) });
@@ -1657,6 +1720,7 @@ export default {
 
     if (path === "/admin/registry" && request.method === "GET") return handleAdminRegistry(request, env);
     if (path === "/admin/history" && request.method === "GET") return handleAdminHistory(request, env);
+    if (path === "/admin/audit" && request.method === "POST") return handleAdminAudit(request, env);
 
     // ── /auth/* — RBAC admin user-management ──────────────────────────────
     if (path === "/auth/login" && request.method === "POST") return handleAuthLogin(request, env);

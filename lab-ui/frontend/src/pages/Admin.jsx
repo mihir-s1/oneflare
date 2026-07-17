@@ -4,6 +4,7 @@ import {
   ShieldCheck, RefreshCw, Users, History as HistoryIcon,
   Power, PowerOff, Trash2, Lock, PlugZap, AlertTriangle, Clock,
   LogOut, UserPlus, Copy, Check, Mail, KeyRound, UserCheck, X,
+  CheckCircle2, XCircle, Circle,
 } from 'lucide-react'
 import RequestAccountForm from '../components/RequestAccountForm'
 
@@ -304,49 +305,233 @@ function TenantsTable({ rows, onToggle, onDelete, actionBusy, selected, onToggle
   )
 }
 
-// ── History table ─────────────────────────────────────────────────────────────
-function HistoryTable({ history }) {
-  if (history.length === 0) {
+// ── Audit Log table ───────────────────────────────────────────────────────────
+// Friendly event labels, keyed by the raw `type` written by appendHistory().
+// Unknown types fall back to prettifyType() below rather than being hidden.
+const EVENT_LABELS = {
+  login_success: 'Login',
+  login_failure: 'Login failed',
+  logout: 'Logout',
+  register: 'Site registered',
+  're-register': 'Site re-registered',
+  site_register_failure: 'Site registration failed',
+  lab_rename: 'Lab renamed',
+  teardown: 'Site removed',
+  enable: 'Tenant enabled',
+  disable: 'Tenant disabled',
+  dko_deploy: 'Knowledge objects deployed',
+  dko_deploy_failure: 'Deploy failed',
+  s1cfg_saved: 'S1 deploy config saved',
+  s1cfg_deleted: 'S1 deploy config removed',
+  invite_created: 'Invite sent',
+  account_requested: 'Account requested',
+  account_request_accepted: 'Account request accepted',
+  account_request_declined: 'Account request declined',
+  admin_user_created: 'User created',
+  admin_role_changed: 'Role changed',
+  admin_user_removed: 'User removed',
+  bootstrap_invite_created: 'Bootstrap invite created',
+  forward_error: 'Forward error',
+  dropped_unknown_host: 'Unknown host dropped',
+}
+
+function prettifyType(type) {
+  if (!type) return 'Event'
+  return String(type)
+    .replace(/[_-]+/g, ' ')
+    .replace(/\b\w/g, (c) => c.toUpperCase())
+}
+
+function eventLabel(entry) {
+  return EVENT_LABELS[entry.type] || prettifyType(entry.type)
+}
+
+// Category classification — order matters (more specific buckets first, then
+// the generic "errors" catch-all for anything left over).
+function categoryOf(type) {
+  const t = type || ''
+  if (t === 'login_success' || t === 'login_failure' || t === 'logout') return 'logins'
+  if (['register', 're-register', 'site_register_failure', 'lab_rename', 'teardown', 'enable', 'disable'].includes(t)) {
+    return 'sites'
+  }
+  if (t.startsWith('dko_') || t.startsWith('s1cfg_')) return 'deploys'
+  if (t.startsWith('invite_') || t.startsWith('admin_') || t.startsWith('account_') || t.startsWith('bootstrap_')) {
+    return 'users'
+  }
+  if (t === 'forward_error' || t === 'dropped_unknown_host' || t.endsWith('_failure')) return 'errors'
+  return 'other'
+}
+
+const CATEGORY_FILTERS = [
+  { key: 'all', label: 'All' },
+  { key: 'logins', label: 'Logins' },
+  { key: 'sites', label: 'Sites' },
+  { key: 'deploys', label: 'Deploys' },
+  { key: 'users', label: 'Users & Invites' },
+  { key: 'errors', label: 'Errors' },
+]
+
+// success / failure / neutral — drives the Status column's icon + color.
+function auditStatus(entry) {
+  const t = entry.type || ''
+  if (entry.status === 'failure' || t === 'forward_error' || t.endsWith('_failure')) return 'failure'
+  if (entry.status === 'success' || t.endsWith('_success')) return 'success'
+  return 'neutral'
+}
+
+function AuditStatusBadge({ status }) {
+  if (status === 'success') {
     return (
-      <div className="rounded-xl border border-[#2d1b4e] bg-[#1a0a2e]/50 p-12 flex flex-col items-center gap-4">
-        <div className="w-12 h-12 rounded-xl bg-white/5 border border-white/10 flex items-center justify-center">
-          <HistoryIcon className="w-6 h-6 text-slate-500" />
-        </div>
-        <div className="text-center">
-          <p className="text-slate-300 font-medium">No relay history yet</p>
-          <p className="text-sm text-slate-500 mt-1">Registration and routing events will appear here.</p>
-        </div>
-      </div>
+      <span className="inline-flex items-center gap-1 text-xs font-semibold text-green-400">
+        <CheckCircle2 className="w-3.5 h-3.5" /> Success
+      </span>
     )
   }
+  if (status === 'failure') {
+    return (
+      <span className="inline-flex items-center gap-1 text-xs font-semibold text-red-400">
+        <XCircle className="w-3.5 h-3.5" /> Failure
+      </span>
+    )
+  }
+  return (
+    <span className="inline-flex items-center gap-1 text-xs font-semibold text-slate-500">
+      <Circle className="w-2 h-2 fill-current" /> —
+    </span>
+  )
+}
+
+// Compact per-type detail summary for the Details column.
+function auditDetails(entry) {
+  if (entry.reason) return entry.reason
+  switch (entry.type) {
+    case 'dko_deploy':
+      return `${entry.deployed ?? 0} deployed · ${entry.skipped ?? 0} skipped · ${entry.failed ?? 0} failed` +
+        (entry.site ? ` · ${entry.site}` : '')
+    case 'forward_error':
+      return [entry.status ? `HTTP ${entry.status}` : null, entry.error].filter(Boolean).join(' — ') || '—'
+    case 'dropped_unknown_host': {
+      const hosts = entry.hosts && typeof entry.hosts === 'object' ? Object.keys(entry.hosts) : []
+      return hosts.length ? `${hosts.length} unknown host(s): ${hosts.slice(0, 3).join(', ')}${hosts.length > 3 ? '…' : ''}` : '—'
+    }
+    case 'register':
+    case 're-register':
+      return [entry.subdomain, entry.name].filter(Boolean).join(' · ') || '—'
+    case 'lab_rename':
+      return `${entry.from || '—'} → ${entry.to || '—'}`
+    case 'teardown':
+    case 'enable':
+    case 'disable':
+      return entry.subdomain || '—'
+    case 'invite_created':
+      return [entry.email, entry.role].filter(Boolean).join(' · ') || '—'
+    case 'account_requested':
+      return [entry.name, entry.email].filter(Boolean).join(' · ') || '—'
+    case 'account_request_accepted':
+    case 'account_request_declined':
+      return entry.email || '—'
+    case 'admin_user_created':
+    case 'admin_role_changed':
+      return [entry.email, entry.role].filter(Boolean).join(' · ') || '—'
+    case 'admin_user_removed':
+    case 'bootstrap_invite_created':
+      return entry.email || '—'
+    case 's1cfg_saved':
+    case 's1cfg_deleted':
+      return entry.owner || '—'
+    case 'login_success':
+      return [entry.email, entry.role].filter(Boolean).join(' · ') || '—'
+    case 'logout':
+      return entry.email || '—'
+    default:
+      return [entry.subdomain, entry.name, entry.email, entry.owner].filter(Boolean).join(' · ') || '—'
+  }
+}
+
+const AUDIT_GRID_COLS = 'grid-cols-[9rem_13rem_11rem_7rem_1fr]'
+
+function HistoryTable({ history }) {
+  const [filter, setFilter] = useState('all')
 
   // Newest first
   const sorted = [...history].sort((a, b) => new Date(b.ts || 0) - new Date(a.ts || 0))
+  const counts = CATEGORY_FILTERS.reduce((acc, c) => {
+    acc[c.key] = c.key === 'all' ? sorted.length : sorted.filter((e) => categoryOf(e.type) === c.key).length
+    return acc
+  }, {})
+  const filtered = filter === 'all' ? sorted : sorted.filter((e) => categoryOf(e.type) === filter)
 
   return (
-    <div className="rounded-xl border border-[#2d1b4e] overflow-hidden">
-      <div className="grid grid-cols-[auto_auto_1fr] gap-4 px-5 py-3 bg-[#1a0a2e] border-b border-[#2d1b4e] text-xs font-semibold text-slate-500 uppercase tracking-wider">
-        <span>Timestamp</span>
-        <span>Type</span>
-        <span>Detail</span>
+    <div className="space-y-3">
+      <div className="flex flex-wrap items-center gap-2">
+        {CATEGORY_FILTERS.map((c) => (
+          <button
+            key={c.key}
+            onClick={() => setFilter(c.key)}
+            className={`inline-flex items-center gap-1.5 rounded-full border px-2.5 py-1 text-xs font-semibold font-mono tracking-wide transition-colors ${
+              filter === c.key
+                ? 'bg-orange-500/15 text-orange-400 border-orange-500/30'
+                : 'bg-white/5 text-slate-400 border-white/10 hover:text-slate-200 hover:border-slate-600'
+            }`}
+          >
+            {c.label}
+            <span className="text-slate-500">{counts[c.key]}</span>
+          </button>
+        ))}
       </div>
-      {sorted.map((entry, i) => (
-        <div
-          key={i}
-          className="grid grid-cols-[auto_auto_1fr] gap-4 px-5 py-3 border-b border-[#1e1235] last:border-0 hover:bg-white/[0.02] transition-colors items-center"
-        >
-          <div className="flex items-center gap-1.5 text-xs text-slate-400 font-mono whitespace-nowrap">
-            <Clock className="w-3 h-3 text-slate-600" />
-            {formatTime(entry.ts)}
+
+      {filtered.length === 0 ? (
+        <div className="rounded-xl border border-[#2d1b4e] bg-[#1a0a2e]/50 p-12 flex flex-col items-center gap-4">
+          <div className="w-12 h-12 rounded-xl bg-white/5 border border-white/10 flex items-center justify-center">
+            <HistoryIcon className="w-6 h-6 text-slate-500" />
           </div>
-          <span className="inline-flex items-center rounded-full font-semibold bg-white/5 border border-white/10 text-slate-300 px-2 py-0.5 text-xs whitespace-nowrap">
-            {entry.type || 'event'}
-          </span>
-          <span className="text-xs font-mono text-slate-400 truncate">
-            {entry.subdomain || entry.name || '—'}
-          </span>
+          <div className="text-center">
+            <p className="text-slate-300 font-medium">
+              {sorted.length === 0 ? 'No audit events yet' : 'No events match this filter'}
+            </p>
+            <p className="text-sm text-slate-500 mt-1">
+              {sorted.length === 0
+                ? 'Logins, site registrations, deploys, and user changes will appear here.'
+                : 'Try a different category, or select All.'}
+            </p>
+          </div>
         </div>
-      ))}
+      ) : (
+        <div className="rounded-xl border border-[#2d1b4e] overflow-hidden">
+          <div className="overflow-x-auto">
+            <div className="min-w-[900px]">
+              <div className={`grid ${AUDIT_GRID_COLS} gap-4 px-5 py-3 bg-[#1a0a2e] border-b border-[#2d1b4e] text-xs font-semibold text-slate-500 uppercase tracking-wider`}>
+                <span>Time</span>
+                <span>Event</span>
+                <span>Actor</span>
+                <span>Status</span>
+                <span>Details</span>
+              </div>
+              {filtered.map((entry, i) => (
+                <div
+                  key={i}
+                  className={`grid ${AUDIT_GRID_COLS} gap-4 px-5 py-3 border-b border-[#1e1235] last:border-0 hover:bg-white/[0.02] transition-colors items-center`}
+                >
+                  <div className="flex items-center gap-1.5 text-xs text-slate-400 font-mono whitespace-nowrap">
+                    <Clock className="w-3 h-3 text-slate-600" />
+                    {formatTime(entry.ts)}
+                  </div>
+                  <span className="text-xs font-medium text-slate-200 truncate" title={entry.type}>
+                    {eventLabel(entry)}
+                  </span>
+                  <span className="text-xs font-mono text-slate-400 truncate">
+                    {entry.email || entry.owner || entry.actor || entry.by || '—'}
+                  </span>
+                  <AuditStatusBadge status={auditStatus(entry)} />
+                  <span className="text-xs font-mono text-slate-500 truncate" title={auditDetails(entry)}>
+                    {auditDetails(entry)}
+                  </span>
+                </div>
+              ))}
+            </div>
+          </div>
+        </div>
+      )}
     </div>
   )
 }
@@ -1094,7 +1279,7 @@ export default function Admin() {
                   : 'text-slate-500 border-transparent hover:text-slate-300 hover:border-slate-600'
               }`}
             >
-              <HistoryIcon className="w-3.5 h-3.5" /> History
+              <HistoryIcon className="w-3.5 h-3.5" /> Audit Log
               <span className="text-xs font-mono text-slate-500">{history.length}</span>
             </button>
             <button

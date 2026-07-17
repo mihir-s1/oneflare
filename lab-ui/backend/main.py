@@ -930,6 +930,16 @@ def _s1_err(status, body) -> str:
     return f"HTTP {status}"
 
 
+def _audit(event: dict):
+    """Best-effort admin audit-log write via the relay's ADMIN_TOKEN break-glass
+    route (POST /admin/audit). Must never raise — an audit-log failure can never
+    be allowed to break login/register/deploy."""
+    try:
+        _li.admin_request("POST", "/admin/audit", json_body=event)
+    except Exception:
+        pass
+
+
 def _deploy_load_creds(request: Request):
     """Resolve the caller's session email, then pull their RAW S1 deploy creds
     from the relay (ADMIN_TOKEN break-glass). Raises HTTPException on any gap.
@@ -1149,7 +1159,19 @@ def deploy_run(request: Request, body: DeployRunReq):
     frontend sends each artifact JSON as `payload` (manifest is client-side truth;
     the backend reads no repo files). Per-object result:
     {key, type, status:'deployed'|'skipped'|'error', id?, message}."""
-    session, cfg = _deploy_load_creds(request)
+    def _resolved_email():
+        try:
+            s = _session_from_cookies(dict(request.cookies))
+            return s.get("email") if s else None
+        except Exception:
+            return None
+
+    try:
+        session, cfg = _deploy_load_creds(request)
+    except HTTPException as exc:
+        _audit({"type": "dko_deploy_failure", "status": "failure",
+                "actor": _resolved_email(), "reason": exc.detail})
+        raise
     if session.get("role") == "viewer":
         raise HTTPException(status_code=403, detail="viewers cannot deploy")
     console = cfg["console_url"].rstrip("/")
@@ -1157,7 +1179,10 @@ def deploy_run(request: Request, body: DeployRunReq):
     messages: list = []
     site = _deploy_pick_site(dict(request.cookies), console, token, messages)
     if not site:
-        raise HTTPException(status_code=502, detail="; ".join(messages) or "no deployable site for this token")
+        detail = "; ".join(messages) or "no deployable site for this token"
+        _audit({"type": "dko_deploy_failure", "status": "failure",
+                "actor": session.get("email"), "reason": detail})
+        raise HTTPException(status_code=502, detail=detail)
     results = []
     for obj in body.objects:
         try:
@@ -1175,4 +1200,19 @@ def deploy_run(request: Request, body: DeployRunReq):
                                 "message": f"unknown object type '{obj.type}'"})
         except Exception as exc:  # one bad object must not abort the batch
             results.append({"key": obj.key, "type": obj.type, "status": "error", "message": str(exc)[:200]})
+    deployed = sum(1 for r in results if r.get("status") == "deployed")
+    skipped = sum(1 for r in results if r.get("status") == "skipped")
+    failed = sum(1 for r in results if r.get("status") == "error")
+    _audit({
+        "type": "dko_deploy",
+        "status": "success" if failed == 0 else "failure",
+        "actor": session.get("email"),
+        "site": site.get("name"),
+        "site_id": site.get("id"),
+        "deployed": deployed,
+        "skipped": skipped,
+        "failed": failed,
+        "failures": [{"key": r["key"], "type": r["type"], "message": r.get("message")}
+                     for r in results if r.get("status") == "error"],
+    })
     return {"ok": True, "site": site, "results": results}
