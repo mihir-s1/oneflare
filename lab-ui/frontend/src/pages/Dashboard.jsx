@@ -83,7 +83,7 @@ export default function Dashboard() {
   return (
     <div className="page-enter space-y-8">
       {/* Hero */}
-      <section className="hero-dark relative rounded-2xl overflow-hidden" style={{ minHeight: '280px' }}>
+      <section className="relative rounded-2xl overflow-hidden" style={{ minHeight: '280px' }}>
         <div className="absolute inset-0 hero-gradient" />
         <div className="orange-blob" style={{ top: '-80px', right: '-60px', opacity: 0.8 }} />
         <div className="purple-blob" style={{ bottom: '-120px', left: '-80px', opacity: 0.7 }} />

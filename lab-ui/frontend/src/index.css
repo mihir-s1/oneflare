@@ -257,6 +257,18 @@ html[data-theme="light"] .gradient-text-purple {
     #0d0620 100%
   );
 }
+html[data-theme="light"] .hero-gradient {
+  background: linear-gradient(135deg,
+    #fbf9ff 0%,
+    #f4eefc 25%,
+    #f7eef7 50%,
+    #f1ecfb 75%,
+    #fbf9ff 100%
+  );
+}
+/* soften the glow blobs so they read as a light tint, not a dark smudge */
+html[data-theme="light"] .orange-blob { background: radial-gradient(circle, rgba(243,128,32,0.16) 0%, transparent 70%); }
+html[data-theme="light"] .purple-blob { background: radial-gradient(circle, rgba(168,85,247,0.14) 0%, transparent 70%); }
 
 /* Orange glow blob */
 .orange-blob {
