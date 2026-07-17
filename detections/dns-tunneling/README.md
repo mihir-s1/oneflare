@@ -2,7 +2,7 @@
 
 Scheduled PowerQuery detection for OneFlare **scenario 05**
 (`attack-scripts/scenarios/05_dns_tunnel.py`). Behaviour-based — it does **not**
-hard-code `acmecorp-lab.workers.dev`; it keys on label length, digit-ratio
+hard-code `soledrop-lab.workers.dev`; it keys on label length, digit-ratio
 ("entropy" proxy), unique-subdomain volume per zone, and TXT-with-long-label.
 
 | File | Purpose |
@@ -14,7 +14,7 @@ hard-code `acmecorp-lab.workers.dev`; it keys on label length, digit-ratio
 ## What it catches (the three attack patterns)
 
 1. **DGA beaconing** — ~20 A queries with random 12–24 char labels under
-   `c2tunnel|beacon|update.acmecorp-lab.workers.dev`. Caught by `uniq_labels`
+   `c2tunnel|beacon|update.soledrop-lab.workers.dev`. Caught by `uniq_labels`
    (distinct leftmost labels under one zone) and `hi_entropy`.
 2. **Data-in-DNS exfil** — TXT queries whose leftmost label is base32 data
    (each chunk ~20 chars). Caught by `txt_long` = TXT with leftmost label ≥ 20.
@@ -22,7 +22,7 @@ hard-code `acmecorp-lab.workers.dev`; it keys on label length, digit-ratio
    Caught by `long_labels` (count of ≥40-char labels) gated by `uniq_labels`.
 
 The three C2 prefixes all roll up to a single **zone** = the rightmost 3 labels
-of the FQDN (`acmecorp-lab.workers.dev`), so the signal does not fragment across
+of the FQDN (`soledrop-lab.workers.dev`), so the signal does not fragment across
 `beacon.*` / `update.*` / `c2tunnel.*`.
 
 ## Exact fields used (verified from a live SDL export)
@@ -69,7 +69,7 @@ Two tuning rounds, each driven by a real false positive:
 |---|---|---|---|---|---|---|---|
 | 1 | `saas.atlassian.com` | 1 | 2 | 0 | 0 | ⚠️ FP (tripped `max_label_len ≥ 50`) | dropped standalone long-label trigger |
 | 2 | `cloudapp.azure.com` | **67** | 0 | 0 | **0** | ⚠️ FP (tripped `uniq_labels ≥ 15`) | gated the volume branch on entropy |
-| ✓ | `acmecorp-lab.workers.dev` (attack ×2) | 33 | 10 | 3 | 28–29 | ✅ TP (fires on all branches) | — |
+| ✓ | `soledrop-lab.workers.dev` (attack ×2) | 33 | 10 | 3 | 28–29 | ✅ TP (fires on all branches) | — |
 
 **The lesson:** neither long labels nor high subdomain cardinality is malicious on
 its own — legit SaaS/CDN (Atlassian, Azure) produce both. DNS tunneling / DGA is

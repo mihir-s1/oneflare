@@ -211,8 +211,8 @@ export default function Dashboard() {
         <div
           role="button"
           tabIndex={0}
-          onClick={() => navigate('/threatops')}
-          onKeyDown={e => e.key === 'Enter' && navigate('/threatops')}
+          onClick={() => navigate('/scenarios#campaigns')}
+          onKeyDown={e => e.key === 'Enter' && navigate('/scenarios#campaigns')}
           className="card-hover-purple rounded-xl bg-[#1a0a2e] border border-[#2d1b4e] p-6 cursor-pointer outline-none focus-visible:ring-2 focus-visible:ring-purple-500/50"
         >
           <div className="flex items-center gap-3 mb-3">
@@ -228,7 +228,7 @@ export default function Dashboard() {
             Industry drip-flow campaigns (financial, healthcare, SaaS) and the Agentic AI Breakout CTF — live pacing, phase timelines, and SOC talking points.
           </p>
           <div className="flex items-center gap-1.5 text-sm font-semibold text-purple-400">
-            Open ThreatOps
+            Browse campaigns
             <ChevronRight className="w-4 h-4" />
           </div>
         </div>

@@ -1,12 +1,17 @@
 # OCSF Field Contract — Cloudflare → SentinelOne (for CTF detections)
 
 Source of truth: `parsers/cloudflare-ocsf-parser/cloudflare-ocsf-parser.conf` (v1.6.0) +
-`metadata.yaml`. This is the contract every rule in `detections/ctf/` depends on. Confirm against
-live schema discovery (`powerquery_schema_discover` on `dataSource.name='Cloudflare'`) before deploy.
+`metadata.yaml`, **cross-checked against live `powerquery_schema_discover` output** on a real
+tenant (`usea1-partners`, 2026-07-10) — the corrections below are confirmed, not guessed.
 
-The CTF attack (`attack-scripts/campaigns/ctf.py`) generates **HTTP Requests** and **Firewall Events**
-Cloudflare Logpush datasets. Both parse to OCSF **HTTP Activity, `class_uid = 4002`,
-`category_uid = 4`**, `dataSource.name = 'Cloudflare'`.
+The CTF attack (`attack-scripts/campaigns/ctf.py`) generates **HTTP Requests** and **Firewall
+events** Cloudflare Logpush datasets, both under `dataSource.name = 'Cloudflare'`, distinguished by
+`dataSource.cloudflare_dataset` (`'HTTP Requests'` vs `'Firewall events'`).
+
+> **Multi-tenant note:** a single S1 account can carry *other* Cloudflare integrations (e.g. a
+> Gateway/Zero-Trust feed) under the same `dataSource.name='Cloudflare'`. Every query MUST also
+> scope on host — for the per-attendee lab, `http_request.url.hostname contains '.lab.soledrop.co'`
+> — or it drowns in unrelated traffic.
 
 ## Mapped fields (confirmed in parser v1.6.0)
 
@@ -20,7 +25,7 @@ Cloudflare Logpush datasets. Both parse to OCSF **HTTP Activity, `class_uid = 40
 | `ClientIP` | `src_endpoint.ip` | str | all (entity) |
 | `ClientRequestPath` | `http_request.url.path` | str | Box1, Box4, Exfil |
 | `ClientRequestURI` | `http_request.url.url_string` | str | Box1, Box3, Box4 (payload-in-URL) |
-| `ClientRequestHost` | `http_request.url.hostname` | str | scoping to NovaMind hosts |
+| `ClientRequestHost` | `http_request.url.hostname` | str | scoping — `contains '.lab.soledrop.co'` |
 | `ClientRequestMethod` | `http_request.http_method` | str | Box3 (POST /chat), Box4 |
 | `ClientRequestUserAgent` | `http_request.user_agent` | str | Box1 (scanner UA), Box2, Box3 (JNDI-in-UA) |
 | `OriginResponseStatus` | `http_response.status` | str | Box1, Exfil |
@@ -29,11 +34,16 @@ Cloudflare Logpush datasets. Both parse to OCSF **HTTP Activity, `class_uid = 40
 | `SecurityAction` | `action` | str | Box1, Box4 (block/managed_challenge) |
 | `SecurityRuleDescription` | `firewall_rule.desc` | str | Box1, Box4 (rule name) |
 | `SecurityRuleID` | `firewall_rule.uid` | str | Box1, Box4 |
-| `WAFAttackScore` | `risk_score` | int (cast) | Box4 (overall WAF score; wrap in `number()`) |
-| `JA4` | `ja4_fingerprint_list[0].value` | str | **Box2 (signature)**, chain pivot |
-| `JA3Hash` | `tls.ja3_hash.value` | str | Box2 (secondary) |
-| `WorkerScriptName` | `actor.process.name` | str | scoping to Pyxis worker |
+| `WAFSQLiAttackScore` / `WAFRCEAttackScore` / `WAFXSSAttackScore` | `unmapped.WAFSQLiAttackScore` etc. | **str** — cast with `number()` | Box4 (per-category WAF score) |
+| `JA3Hash` | `tls.ja3_hash.value` | str | **Box2 (signature)** — use this, not JA4 |
+| `JA4` | *(not queryable)* `ja4_fingerprint_list[0].value` | str | **avoid** — PQ can't address the `[0]` array element (bracket errors; dot-index returns null) |
+| `WorkerScriptName` | `actor.process.name` | str | scoping to SoleDrop Concierge worker |
 | `EdgeStartTimestamp` | `time` / `start_time` | datetime | windowing |
+
+> **⚠️ WAF score direction — confirmed on live tenant:** these scores run 1–99 where **LOWER =
+> MORE malicious** (a confirmed SQLi attack scored 8–10; a confirmed RCE/breakout request scored 1;
+> clean traffic scored ~97). This is the **opposite** of the intuitive reading — always guard with
+> `score > 0 && score <= 20` for "this is an attack," never `>= 90`.
 
 ### Firewall Events dataset (`dataSource.cloudflare_dataset = 'Firewall Events'`)
 
@@ -51,27 +61,22 @@ Cloudflare Logpush datasets. Both parse to OCSF **HTTP Activity, `class_uid = 40
 | `ClientASN` | `src_endpoint.owner.account.uid` | str | enrichment context |
 | `ClientASNDescription` | `src_endpoint.owner.account.name` | str | enrichment context |
 
-## Unmapped fields — TO-VERIFY (NOT in parser v1.6.0)
+## Verified `unmapped.*` fields (confirmed via live schema discovery)
 
-These are emitted by the CTF attack / Cloudflare but the parser does not rename them. With the
-parser's `rename_tree → unmapped` they SHOULD be queryable under `unmapped.<Field>`, but the exact
-promoted name/casing is **unconfirmed**. Do not treat as ground truth — run schema discovery.
+These promote to `unmapped.<Field>` exactly as named, all as **strings** — always wrap numeric ones
+in `number()` before comparing/aggregating.
 
-| Cloudflare raw field | Expected queryable name (TO-VERIFY) | Used by | Fallback if absent |
+| Cloudflare raw field | Queryable name | Used by | Notes |
 |---|---|---|---|
-| `BotScore` | `unmapped.BotScore` (int — wrap `number()`) | Box2 | rely on JA4 grouping alone |
-| `BotScoreSrc` | `unmapped.BotScoreSrc` | Box2 | n/a |
-| `BotDetectionTags` | `unmapped.BotDetectionTags` (array: `['scraper','python']`) | Box2, Box3 | UA-pattern match |
-| `FirewallForAIInjectionScore` | `unmapped.FirewallForAIInjectionScore` (int) | Box3 | payload-text S1QL on URL/UA |
-| `AISecurityInjectionScore` | `unmapped.AISecurityInjectionScore` (int) | Box3 | payload-text S1QL |
-| `WAFSQLiAttackScore` | `unmapped.WAFSQLiAttackScore` (int) | Box4 | `risk_score` + SQLi markers |
-| `WAFRCEAttackScore` | `unmapped.WAFRCEAttackScore` (int) | Box4 | `risk_score` + RCE markers (`jndi:`,`ognl`) |
-| `WAFXSSAttackScore` | `unmapped.WAFXSSAttackScore` (int) | Box4 | `risk_score` + XSS markers |
+| `BotScore` | `unmapped.BotScore` | Box2 | needs the **Bot Management** entitlement to populate |
+| `BotScoreSrc` | `unmapped.BotScoreSrc` | Box2 | e.g. `"Machine Learning"` |
+| `FirewallForAIInjectionScore` | `unmapped.FirewallForAIInjectionScore` | Box3 | **higher = worse** (100 seen on a confirmed injection) — opposite direction from the WAF scores above |
+| `WAFSQLiAttackScore` | `unmapped.WAFSQLiAttackScore` | Box4 | **lower = worse** (see the score-direction note above) |
+| `WAFRCEAttackScore` | `unmapped.WAFRCEAttackScore` | Box4 | **lower = worse** |
+| `WAFXSSAttackScore` | `unmapped.WAFXSSAttackScore` | Box4 | **lower = worse** (same family as SQLi/RCE — inferred, not separately fired in validation) |
 
-**Recommended remediation (coordinate with `s1-log-parser-engineer`):** extend the Cloudflare parser
-to promote these to stable fields, e.g. a `cloudflare.bot.*` / `cloudflare.waf.*` / `cloudflare.ai.*`
-extension namespace, or map the AI injection score onto `risk_score` for the chat dataset. Until then,
-every rule depending on a TO-VERIFY field also ships a payload-text fallback clause so it still fires.
+`BotDetectionTags` / `AISecurityInjectionScore` were **not** observed on the live tenant — if you
+need them, run `powerquery_schema_discover` first rather than assuming the name/casing.
 
 ## The CTF flag constant (verbatim, from ctf.py)
 
@@ -81,9 +86,10 @@ JA4 = t13d1812h1_85036bcba153_b26ce05bbdd6
 
 This is the Python `requests` TLS fingerprint. It is **constant** across all CTF boxes regardless of
 the rotating User-Agent — that invariance is exactly what Box 2 detects and what ties all 4 boxes to
-one actor.
+one actor. **In practice, query on `tls.ja3_hash.value`** (JA4 isn't PQ-addressable per the note
+above) — it carries the same one-fingerprint-many-user-agents signal.
 
-## NovaMind recon / sensitive paths (from ctf.py RECON_PATHS / BREAKOUT_ENDPOINTS)
+## SoleDrop recon / sensitive paths (from ctf.py RECON_PATHS / BREAKOUT_ENDPOINTS)
 
 Sensitive-file probes: `/.env`, `/.env.production`, `/.env.local`, `/.git/HEAD`, `/.git/config`,
 `/.aws/credentials`, `/config.json`, `/secrets.json`, `/.DS_Store`.
@@ -91,5 +97,5 @@ Forced-browse / API recon: `/api/v1/admin` (always 401), `/api/v1/users`, `/api/
 `/api/v1/models`, `/actuator/env`, `/admin`, `/admin/config`, `/phpmyadmin`, `/wp-login.php`.
 Exfil targets: `/api/v1/training-data`, `/api/v1/models?include_weights=true`,
 `/api/v1/customers/export`, `/api/v1/billing`.
-Pyxis AI target: `POST /api/v1/chat` (model `pyxis-chat-v2`).
+SoleDrop Concierge AI target: `POST /api/v1/chat` (model `soledrop-concierge-v2`).
 </content>

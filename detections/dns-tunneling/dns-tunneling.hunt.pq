@@ -2,7 +2,7 @@
 // HUNT: DNS tunneling / C2 beaconing on Cloudflare Gateway DNS
 // OneFlare lab — scenario 05 (attack-scripts/scenarios/05_dns_tunnel.py)
 // ----------------------------------------------------------------------------
-// Behaviour-based (does NOT hard-code acmecorp-lab.workers.dev). Returns one
+// Behaviour-based (does NOT hard-code soledrop-lab.workers.dev). Returns one
 // row per (source host, DNS zone) with computed label-length, unique-label
 // count, digit-ratio ("entropy" proxy), and sample labels so a human can eyeball.
 //

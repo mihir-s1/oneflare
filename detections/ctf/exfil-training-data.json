@@ -1,11 +1,11 @@
 {
   "box": "Cross-box — Training-data / model-weight / customer-data exfiltration",
-  "scenario": "The agent pulls NovaMind proprietary assets in bulk: training datasets (/api/v1/training-data), model weights (/api/v1/models?include_weights=true), and customer PII (/api/v1/customers/export). Detect by abnormal response volume and/or bulk access to exfil-target endpoints.",
+  "scenario": "The agent pulls SoleDrop proprietary assets in bulk: training datasets (/api/v1/training-data), model weights (/api/v1/models?include_weights=true), and customer PII (/api/v1/customers/export). Detect by abnormal response volume and/or bulk access to exfil-target endpoints.",
   "attack_source": "attack-scripts/campaigns/ctf.py :: BOT_PROBE_PATHS + BREAKOUT_ENDPOINTS (/api/v1/training-data, /api/v1/models?include_weights=true, /api/v1/users?limit=1000, /api/v1/billing) and our existing scenario 06 (/api/v1/customers/export).",
   "field_contract": "detections/shared/field-contract.md",
   "rules": [
     {
-      "name": "NovaMind-Exfil-TrainingData-ModelWeights",
+      "name": "SoleDrop-Exfil-TrainingData-ModelWeights",
       "rule_type": "scheduled (PowerQuery)",
       "severity": "Critical",
       "mitre": ["T1020 Automated Exfiltration", "T1213 Data from Information Repositories", "T1530 Data from Cloud Storage Object"],
@@ -18,18 +18,18 @@
         "http_response.body_length": "mapped (OriginResponseBytes, int) — response size; wrap number()",
         "http_response.status": "mapped (OriginResponseStatus) — successful 200 pulls",
         "src_endpoint.ip": "mapped — entity",
-        "ja4_fingerprint_list[0].value": "mapped — chain pivot",
+        "tls.ja3_hash.value": "mapped (JA3Hash) — chain pivot (use in place of JA4)",
         "note_no_EdgeResponseBytes": "Parser v1.6.0 has NO EdgeResponseBytes mapping (story-map uses it). Use http_response.body_length (OriginResponseBytes) instead."
       },
       "hunt_query": {
-        "powerquery": "dataSource.name='Cloudflare' dataSource.cloudflare_dataset='HTTP Requests' http_request.url.path=* | filter (http_request.url.path in ('/api/v1/training-data','/api/v1/models','/api/v1/customers/export','/api/v1/users','/api/v1/billing','/api/v1/tenants') OR http_request.url.url_string matches '(?i)(include_weights=true|export=true|format=jsonl|limit=1000|/customers/export|/training-data)') | group pulls=count(), total_bytes=sum(number(http_response.body_length)), max_bytes=max(number(http_response.body_length)), endpoints=estimate_distinct(http_request.url.path), ok=count(http_response.status='200'), first_seen=oldest(timestamp), last_seen=newest(timestamp), ja4=any(ja4_fingerprint_list[0].value), ua=any(http_request.user_agent) by src_ip=src_endpoint.ip | filter pulls >= 10 OR total_bytes >= 5000000 | columns src_ip, pulls, total_bytes, max_bytes, endpoints, ok, ja4, ua, first_seen, last_seen | sort -total_bytes | limit 100",
-        "note": "Dual threshold: >=10 pulls to exfil endpoints OR >=5 MB aggregate response in the window. number() guards the type-locked body_length column. count(http_response.status='200') counts only successful pulls (predicate-count form — TO-VERIFY this count(predicate) syntax against functions-reference; if unsupported, drop the ok column). Walk thresholds against a benign baseline of legitimate export usage before production.",
+        "powerquery": "dataSource.name='Cloudflare' dataSource.cloudflare_dataset='HTTP Requests' http_request.url.hostname contains '.lab.soledrop.co' http_request.url.path=* | filter (http_request.url.path in ('/api/v1/training-data','/api/v1/models','/api/v1/customers/export','/api/v1/users','/api/v1/billing','/api/v1/tenants') OR http_request.url.url_string matches '(?i)(include_weights=true|export=true|format=jsonl|limit=1000|/customers/export|/training-data)') | group pulls=count(), total_bytes=sum(number(http_response.body_length)), max_bytes=max(number(http_response.body_length)), endpoints=estimate_distinct(http_request.url.path), ok=count(http_response.status='200'), first_seen=oldest(timestamp), last_seen=newest(timestamp), ja3=any(tls.ja3_hash.value), ua=any(http_request.user_agent) by src_ip=src_endpoint.ip | filter pulls >= 10 OR total_bytes >= 5000000 | columns src_ip, pulls, total_bytes, max_bytes, endpoints, ok, ja3, ua, first_seen, last_seen | sort -total_bytes | limit 100",
+        "note": "Dual threshold: >=10 pulls to exfil endpoints OR >=5 MB aggregate response in the window. number() guards the type-locked body_length column. count(http_response.status='200') counts only successful pulls (predicate-count form — confirmed live: count(<predicate>) is valid PowerQuery syntax). Walk thresholds against a benign baseline of legitimate export usage before production.",
         "row_counts": "TO-RUN on live tenant."
       },
       "api_body": {
         "data": {
-          "name": "NovaMind-Exfil-TrainingData-ModelWeights",
-          "description": "Bulk exfiltration of NovaMind proprietary data: >=10 pulls to training-data/model-weights/customer-export endpoints OR >=5MB aggregate response from one source in the window. MITRE T1020 / T1213 / T1530; ATLAS AML.T0024 / AML.T0044. Source: Cloudflare HTTP Requests (class_uid=4002).",
+          "name": "SoleDrop-Exfil-TrainingData-ModelWeights",
+          "description": "Bulk exfiltration of SoleDrop proprietary data: >=10 pulls to training-data/model-weights/customer-export endpoints OR >=5MB aggregate response from one source in the window. MITRE T1020 / T1213 / T1530; ATLAS AML.T0024 / AML.T0044. Source: Cloudflare HTTP Requests (class_uid=4002).",
           "queryType": "scheduled",
           "queryLang": "2.0",
           "severity": "Critical",
@@ -39,7 +39,7 @@
           "networkQuarantine": false,
           "entityMappings": [{"columnName": "src_ip"}, {"columnName": "ja4"}],
           "scheduledParams": {
-            "query": "dataSource.name='Cloudflare' dataSource.cloudflare_dataset='HTTP Requests' http_request.url.path=* | filter (http_request.url.path in ('/api/v1/training-data','/api/v1/models','/api/v1/customers/export','/api/v1/users','/api/v1/billing','/api/v1/tenants') OR http_request.url.url_string matches '(?i)(include_weights=true|export=true|format=jsonl|limit=1000|/customers/export|/training-data)') | group pulls=count(), total_bytes=sum(number(http_response.body_length)), max_bytes=max(number(http_response.body_length)), endpoints=estimate_distinct(http_request.url.path), first_seen=oldest(timestamp), last_seen=newest(timestamp), ja4=any(ja4_fingerprint_list[0].value), ua=any(http_request.user_agent) by src_ip=src_endpoint.ip | filter pulls >= 10 OR total_bytes >= 5000000 | columns src_ip, pulls, total_bytes, max_bytes, endpoints, ja4, ua, first_seen, last_seen | sort -total_bytes | limit 100",
+            "query": "dataSource.name='Cloudflare' dataSource.cloudflare_dataset='HTTP Requests' http_request.url.hostname contains '.lab.soledrop.co' http_request.url.path=* | filter (http_request.url.path in ('/api/v1/training-data','/api/v1/models','/api/v1/customers/export','/api/v1/users','/api/v1/billing','/api/v1/tenants') OR http_request.url.url_string matches '(?i)(include_weights=true|export=true|format=jsonl|limit=1000|/customers/export|/training-data)') | group pulls=count(), total_bytes=sum(number(http_response.body_length)), max_bytes=max(number(http_response.body_length)), endpoints=estimate_distinct(http_request.url.path), first_seen=oldest(timestamp), last_seen=newest(timestamp), ja3=any(tls.ja3_hash.value), ua=any(http_request.user_agent) by src_ip=src_endpoint.ip | filter pulls >= 10 OR total_bytes >= 5000000 | columns src_ip, pulls, total_bytes, max_bytes, endpoints, ja3, ua, first_seen, last_seen | sort -total_bytes | limit 100",
             "runIntervalMinutes": 15,
             "lookbackWindowMinutes": 15,
             "threshold": {"value": 0, "operator": "Greater"}

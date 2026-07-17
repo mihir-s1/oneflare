@@ -1,11 +1,11 @@
 {
   "box": "Box 4 \u2014 Agentic multi-vector breakout",
-  "scenario": "Full breakout storm: the agent combines recon, bot evasion and AI injection with high-volume RCE (Log4Shell, Spring4Shell, Struts), SSRF to the cloud metadata endpoint (169.254.169.254), and path traversal across every NovaMind endpoint at once.",
+  "scenario": "Full breakout storm: the agent combines recon, bot evasion and AI injection with high-volume RCE (Log4Shell, Spring4Shell, Struts), SSRF to the cloud metadata endpoint (169.254.169.254), and path traversal across every SoleDrop endpoint at once.",
   "attack_source": "attack-scripts/campaigns/ctf.py :: fire_phase_4_* (RCE_PAYLOADS, BREAKOUT_ENDPOINTS, X-Forwarded-For spoofing 185.220.x.x)",
   "field_contract": "detections/shared/field-contract.md",
   "rules": [
     {
-      "name": "NovaMind-CTF-Box4-AgenticBreakout",
+      "name": "SoleDrop-CTF-Box4-AgenticBreakout",
       "rule_type": "correlation",
       "severity": "Critical",
       "mitre": [
@@ -26,16 +26,16 @@
         "http_request.url.path": "mapped \u2014 endpoint + traversal",
         "src_endpoint.ip": "mapped \u2014 correlation entity"
       },
-      "entity_note": "entity must be a tenant-supported correlation entity. 'user' is tenant-confirmed; IP/device-style entities also exist (per detection-rule-types.md) but the exact identifier string for an IP entity is TO-VERIFY on the live tenant. If an IP entity is not available, deploy the scheduled variant below (NovaMind-CTF-Box4-MultiVectorStorm), which groups by src_endpoint.ip directly and needs no correlation-entity support.",
+      "entity_note": "entity must be a tenant-supported correlation entity. 'user' is tenant-confirmed; IP/device-style entities also exist (per detection-rule-types.md) but the exact identifier string for an IP entity is TO-VERIFY on the live tenant. If an IP entity is not available, deploy the scheduled variant below (SoleDrop-CTF-Box4-MultiVectorStorm), which groups by src_endpoint.ip directly and needs no correlation-entity support.",
       "hunt_query": {
-        "powerquery_recon_leg": "dataSource.name='Cloudflare' class_uid=4002 | filter (http_request.url.path in ('/.env','/.git/HEAD','/api/v1/admin','/api/v1/training-data','/actuator/env') OR http_request.url.url_string matches '(?i)(ignore (all )?previous instructions|do anything now|\\bDAN\\b|jailbreak)') | group recon_hits=count(), last=newest(timestamp) by src_endpoint.ip | sort -recon_hits | limit 100",
-        "powerquery_breakout_leg": "dataSource.name='Cloudflare' class_uid=4002 | filter (http_request.url.url_string matches '(?i)(\\$\\{jndi:|\\$\\{\\$\\{|ognl|classLoader|\\.\\./\\.\\./|%2e%2e%2f|169\\.254\\.169\\.254|metadata\\.google\\.internal|file:///etc/passwd)' OR http_request.user_agent matches '(?i)(\\$\\{jndi:|\\$\\{\\$\\{|\\$\\{lower:|\\$\\{::)') | group rce_hits=count(), last=newest(timestamp), uri=any(http_request.url.url_string), ua=any(http_request.user_agent) by src_endpoint.ip | sort -rce_hits | limit 100",
+        "powerquery_recon_leg": "dataSource.name='Cloudflare' class_uid=4002 http_request.url.hostname contains '.lab.soledrop.co' | filter (http_request.url.path in ('/.env','/.git/HEAD','/api/v1/admin','/api/v1/training-data','/actuator/env') OR http_request.url.url_string matches '(?i)(ignore (all )?previous instructions|do anything now|\\bDAN\\b|jailbreak)') | group recon_hits=count(), last=newest(timestamp) by src_endpoint.ip | sort -recon_hits | limit 100",
+        "powerquery_breakout_leg": "dataSource.name='Cloudflare' class_uid=4002 http_request.url.hostname contains '.lab.soledrop.co' | filter (http_request.url.url_string matches '(?i)(\\$\\{jndi:|\\$\\{\\$\\{|ognl|classLoader|\\.\\./\\.\\./|%2e%2e%2f|169\\.254\\.169\\.254|metadata\\.google\\.internal|file:///etc/passwd)' OR http_request.user_agent matches '(?i)(\\$\\{jndi:|\\$\\{\\$\\{|\\$\\{lower:|\\$\\{::)') | group rce_hits=count(), last=newest(timestamp), uri=any(http_request.url.url_string), ua=any(http_request.user_agent) by src_endpoint.ip | sort -rce_hits | limit 100",
         "note": "Run each leg standalone via powerquery_run to confirm both produce rows for the CTF source IP during the Box 4 storm. The correlation rule below uses the boolean (no-pipe) S1QL forms of these two filters as sub-queries.",
         "row_counts": "TO-RUN on live tenant."
       },
       "api_body": {
         "data": {
-          "name": "NovaMind-CTF-Box4-AgenticBreakout",
+          "name": "SoleDrop-CTF-Box4-AgenticBreakout",
           "description": "Agentic multi-vector breakout: same source shows recon/prompt-injection AND RCE/SSRF/traversal exploitation in 30 min. Log4Shell/Spring4Shell/Struts + SSRF to 169.254.169.254 + path traversal. MITRE T1190 / T1119 / T1020; ATLAS AML.T0054 / AML.T0040. Source: Cloudflare class_uid=4002.",
           "queryType": "correlation",
           "queryLang": "2.0",
@@ -74,7 +74,7 @@
       "deploy": "POST -> enable {\"filter\":{\"ids\":[\"<id>\"]}} -> poll ?ids=<id>&isLegacy=false until Active. Correlation rules evaluate streaming once thresholds met in the window."
     },
     {
-      "name": "NovaMind-CTF-Box4-MultiVectorStorm",
+      "name": "SoleDrop-CTF-Box4-MultiVectorStorm",
       "rule_type": "scheduled (PowerQuery)",
       "severity": "Critical",
       "mitre": [
@@ -92,22 +92,22 @@
         "src_endpoint.ip": "mapped \u2014 entity (entityMappings)",
         "http_request.url.url_string": "mapped \u2014 classified into attack types",
         "http_request.user_agent": "mapped \u2014 JNDI-in-UA",
-        "risk_score": "mapped (WAFAttackScore) \u2014 wrap number(); corroboration",
-        "ja4_fingerprint_list[0].value": "mapped \u2014 chain pivot",
-        "unmapped.WAFRCEAttackScore": "TO-VERIFY \u2014 preferred per-class score if mapped",
-        "unmapped.WAFSQLiAttackScore": "TO-VERIFY",
-        "unmapped.WAFXSSAttackScore": "TO-VERIFY"
+        "unmapped.WAFSQLiAttackScore / unmapped.WAFRCEAttackScore": "mapped (str) \u2014 wrap number(); LOWER = WORSE (live-verified: confirmed attacks scored 1-10, clean traffic ~97); corroboration",
+        "tls.ja3_hash.value": "mapped (JA3Hash) \u2014 chain pivot (use in place of JA4, which is not PQ-addressable)",
+        "unmapped.WAFRCEAttackScore": "mapped (str, wrap number()) \u2014 confirmed live, LOWER = WORSE",
+        "unmapped.WAFSQLiAttackScore": "mapped (str, wrap number()) \u2014 confirmed live, LOWER = WORSE",
+        "unmapped.WAFXSSAttackScore": "mapped, same family as SQLi/RCE (inferred, not separately fired in validation)"
       },
       "hunt_query": {
-        "powerquery": "dataSource.name='Cloudflare' class_uid=4002 | let payload = http_request.url.url_string + ' ' + http_request.user_agent | let is_rce = if(payload matches '(?i)(\\$\\{jndi:|\\$\\{lower:|ognl|classLoader|\\$\\{::)', 1, 0) | let is_ssrf = if(payload matches '(?i)(169\\.254\\.169\\.254|metadata\\.google\\.internal|file:///)', 1, 0) | let is_trav = if(payload matches '(?i)(\\.\\./\\.\\./|%2e%2e%2f|/etc/passwd|/etc/shadow)', 1, 0) | let is_inj = if(payload matches '(?i)(ignore (all )?previous instructions|do anything now|\\bDAN\\b|jailbreak|union select|or 1=1)', 1, 0) | filter (is_rce + is_ssrf + is_trav + is_inj) > 0 | group rce=max(is_rce), ssrf=max(is_ssrf), trav=max(is_trav), inj=max(is_inj), hits=count(), max_waf=max(number(risk_score)), first_seen=oldest(timestamp), last_seen=newest(timestamp), ja4=any(ja4_fingerprint_list[0].value) by src_ip=src_endpoint.ip | let attack_classes = rce + ssrf + trav + inj | filter attack_classes >= 2 | columns src_ip, attack_classes, rce, ssrf, trav, inj, hits, max_waf, ja4, first_seen, last_seen | sort -attack_classes | limit 100",
-        "note": "attack_classes >= 2 = a source firing at least two distinct exploitation categories. The full breakout storm trips all four. number(risk_score) guards the type-locked WAFAttackScore column. If the per-class unmapped.WAF*AttackScore fields are confirmed, swap the payload-regex classifiers for number(unmapped.WAFRCEAttackScore) >= 90 etc. for higher precision.",
+        "powerquery": "dataSource.name='Cloudflare' class_uid=4002 http_request.url.hostname contains '.lab.soledrop.co' | let payload = http_request.url.url_string + ' ' + http_request.user_agent | let is_rce = if(payload matches '(?i)(\\$\\{jndi:|\\$\\{lower:|ognl|classLoader|\\$\\{::)', 1, 0) | let is_ssrf = if(payload matches '(?i)(169\\.254\\.169\\.254|metadata\\.google\\.internal|file:///)', 1, 0) | let is_trav = if(payload matches '(?i)(\\.\\./\\.\\./|%2e%2e%2f|/etc/passwd|/etc/shadow)', 1, 0) | let is_inj = if(payload matches '(?i)(ignore (all )?previous instructions|do anything now|\\bDAN\\b|jailbreak|union select|or 1=1)', 1, 0) | filter (is_rce + is_ssrf + is_trav + is_inj) > 0 | group rce=max(is_rce), ssrf=max(is_ssrf), trav=max(is_trav), inj=max(is_inj), hits=count(), worst_sqli=min(number(unmapped.WAFSQLiAttackScore)), worst_rce=min(number(unmapped.WAFRCEAttackScore)), first_seen=oldest(timestamp), last_seen=newest(timestamp), ja3=any(tls.ja3_hash.value) by src_ip=src_endpoint.ip | let attack_classes = rce + ssrf + trav + inj | filter attack_classes >= 2 | columns src_ip, attack_classes, rce, ssrf, trav, inj, hits, worst_sqli, worst_rce, ja3, first_seen, last_seen | sort -attack_classes | limit 100",
+        "note": "attack_classes >= 2 = a source firing at least two distinct exploitation categories. The full breakout storm trips all four. CORRECTED (live-verified): the per-class unmapped.WAFSQLiAttackScore/WAFRCEAttackScore fields ARE confirmed and populated as strings; wrap in number() and remember LOWER = WORSE (score 1-10 on confirmed attacks, ~97 on clean traffic) \u2014 the opposite of the >=90 guess this note originally suggested. Payload-regex classifiers (is_rce/is_ssrf/is_trav/is_inj) are kept as the primary signal since they classify the exploit TYPE; the WAF scores serve as corroboration.",
         "row_counts": "TO-RUN on live tenant.",
         "purple_ai_equivalent": "Find requests in the last 15 minutes where WAFRCEAttackScore > 90 AND BotDetectionTags contains python AND ClientRequestPath contains training-data; show RayID, payload, JA4."
       },
       "api_body": {
         "data": {
-          "name": "NovaMind-CTF-Box4-MultiVectorStorm",
-          "description": "One source firing >=2 distinct attack classes (RCE/SSRF/traversal/injection) on NovaMind in the window = coordinated agentic breakout. Log4Shell/Spring4Shell/Struts + SSRF 169.254.169.254 + traversal. MITRE T1190 / T1213 / T1119; ATLAS AML.T0054 / AML.T0024. Source: Cloudflare class_uid=4002.",
+          "name": "SoleDrop-CTF-Box4-MultiVectorStorm",
+          "description": "One source firing >=2 distinct attack classes (RCE/SSRF/traversal/injection) on SoleDrop in the window = coordinated agentic breakout. Log4Shell/Spring4Shell/Struts + SSRF 169.254.169.254 + traversal. MITRE T1190 / T1213 / T1119; ATLAS AML.T0054 / AML.T0024. Source: Cloudflare class_uid=4002.",
           "queryType": "scheduled",
           "queryLang": "2.0",
           "severity": "Critical",
@@ -124,7 +124,7 @@
             }
           ],
           "scheduledParams": {
-            "query": "dataSource.name='Cloudflare' class_uid=4002 | let payload = http_request.url.url_string + ' ' + http_request.user_agent | let is_rce = if(payload matches '(?i)(\\$\\{jndi:|\\$\\{lower:|ognl|classLoader|\\$\\{::)', 1, 0) | let is_ssrf = if(payload matches '(?i)(169\\.254\\.169\\.254|metadata\\.google\\.internal|file:///)', 1, 0) | let is_trav = if(payload matches '(?i)(\\.\\./\\.\\./|%2e%2e%2f|/etc/passwd|/etc/shadow)', 1, 0) | let is_inj = if(payload matches '(?i)(ignore (all )?previous instructions|do anything now|\\bDAN\\b|jailbreak|union select|or 1=1)', 1, 0) | filter (is_rce + is_ssrf + is_trav + is_inj) > 0 | group rce=max(is_rce), ssrf=max(is_ssrf), trav=max(is_trav), inj=max(is_inj), hits=count(), max_waf=max(number(risk_score)), first_seen=oldest(timestamp), last_seen=newest(timestamp), ja4=any(ja4_fingerprint_list[0].value) by src_ip=src_endpoint.ip | let attack_classes = rce + ssrf + trav + inj | filter attack_classes >= 2 | columns src_ip, attack_classes, rce, ssrf, trav, inj, hits, max_waf, ja4, first_seen, last_seen | sort -attack_classes | limit 100",
+            "query": "dataSource.name='Cloudflare' class_uid=4002 http_request.url.hostname contains '.lab.soledrop.co' | let payload = http_request.url.url_string + ' ' + http_request.user_agent | let is_rce = if(payload matches '(?i)(\\$\\{jndi:|\\$\\{lower:|ognl|classLoader|\\$\\{::)', 1, 0) | let is_ssrf = if(payload matches '(?i)(169\\.254\\.169\\.254|metadata\\.google\\.internal|file:///)', 1, 0) | let is_trav = if(payload matches '(?i)(\\.\\./\\.\\./|%2e%2e%2f|/etc/passwd|/etc/shadow)', 1, 0) | let is_inj = if(payload matches '(?i)(ignore (all )?previous instructions|do anything now|\\bDAN\\b|jailbreak|union select|or 1=1)', 1, 0) | filter (is_rce + is_ssrf + is_trav + is_inj) > 0 | group rce=max(is_rce), ssrf=max(is_ssrf), trav=max(is_trav), inj=max(is_inj), hits=count(), worst_sqli=min(number(unmapped.WAFSQLiAttackScore)), worst_rce=min(number(unmapped.WAFRCEAttackScore)), first_seen=oldest(timestamp), last_seen=newest(timestamp), ja3=any(tls.ja3_hash.value) by src_ip=src_endpoint.ip | let attack_classes = rce + ssrf + trav + inj | filter attack_classes >= 2 | columns src_ip, attack_classes, rce, ssrf, trav, inj, hits, worst_sqli, worst_rce, ja3, first_seen, last_seen | sort -attack_classes | limit 100",
             "runIntervalMinutes": 15,
             "lookbackWindowMinutes": 15,
             "threshold": {

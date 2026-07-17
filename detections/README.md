@@ -1,8 +1,8 @@
-# NovaMind / Pyxis CTF Detections — SentinelOne Custom Detection (STAR) Content
+# SoleDrop CTF Detections — SentinelOne Custom Detection (STAR) Content
 
 Detection content for the **Operation Agentic AI Breakout** CTF (`attack-scripts/campaigns/ctf.py`)
-and the AI / data-exfil scenarios of the ThreatOps merge. Company brand: **NovaMind Technologies**;
-rogue agentic AI product under attack: **Pyxis** (`POST /api/v1/chat`).
+and the AI / data-exfil scenarios of the ThreatOps merge. Company brand: **SoleDrop**;
+rogue agentic AI product under attack: **SoleDrop Concierge** (`POST /api/v1/chat`).
 
 **Status: AUTHOR-ONLY.** Nothing here has been deployed to a live tenant. No credentials assumed.
 Every rule body has been authored against the OCSF field contract published by the
@@ -44,14 +44,14 @@ Each `*.json` file contains one or more `rules[]` objects. Each rule object carr
 
 | Box / scenario | Rule name | Type | MITRE / ATLAS | Primary signal |
 |---|---|---|---|---|
-| Box 1 — Recon | `NovaMind-CTF-Box1-ScannerRecon` | single-event | T1595.002 / AML.T0035 | scanner UA (`Nikto`,`sqlmap`,`Nuclei`…) OR sensitive path (`/.env`,`/.git/HEAD`,`/api/v1/admin`) |
-| Box 1 — Recon | `NovaMind-CTF-Box1-ReconSweep-Fanout` | scheduled | T1595.002 | one `src_endpoint.ip` hitting many distinct sensitive/recon paths in window |
-| Box 2 — Bot evasion | `NovaMind-CTF-Box2-PolymorphicJA4` | scheduled | T1036.005 / T1595.002 | **constant JA4 + many distinct User-Agents** from one fingerprint (the signature detection) |
-| Box 3 — Prompt injection | `NovaMind-CTF-Box3-PyxisPromptInjection` | single-event | AML.T0054 / AML.T0040 / T1190 | Firewall-for-AI injection score high on `POST /api/v1/chat`, OR JNDI/DAN payload markers |
-| Box 3 — Prompt injection | `NovaMind-CTF-Box3-PyxisInjectionBurst` | scheduled | AML.T0054 / AML.T0040 | N injection-scored chat requests from one source in window |
-| Box 4 — Breakout | `NovaMind-CTF-Box4-AgenticBreakout` | correlation | T1190 / T1119 / T1020 / AML.T0054 | recon-or-injection THEN high-WAF-score RCE/SSRF/traversal from same source |
-| Box 4 — Breakout | `NovaMind-CTF-Box4-MultiVectorStorm` | scheduled | T1190 / T1213 | one source firing multiple distinct WAF attack classes (RCE+SQLi+XSS+traversal+SSRF) |
-| Exfil | `NovaMind-Exfil-TrainingData-ModelWeights` | scheduled | T1020 / T1213 / AML.T0035 / AML.T0024 | large/bulk responses on `/api/v1/training-data`, `/models?include_weights`, `/customers/export` |
+| Box 1 — Recon | `SoleDrop-CTF-Box1-ScannerRecon` | single-event | T1595.002 / AML.T0035 | scanner UA (`Nikto`,`sqlmap`,`Nuclei`…) OR sensitive path (`/.env`,`/.git/HEAD`,`/api/v1/admin`) |
+| Box 1 — Recon | `SoleDrop-CTF-Box1-ReconSweep-Fanout` | scheduled | T1595.002 | one `src_endpoint.ip` hitting many distinct sensitive/recon paths in window |
+| Box 2 — Bot evasion | `SoleDrop-CTF-Box2-PolymorphicJA4` | scheduled | T1036.005 / T1595.002 | **constant JA4 + many distinct User-Agents** from one fingerprint (the signature detection) |
+| Box 3 — Prompt injection | `SoleDrop-CTF-Box3-ConciergePromptInjection` | single-event | AML.T0054 / AML.T0040 / T1190 | Firewall-for-AI injection score high on `POST /api/v1/chat`, OR JNDI/DAN payload markers |
+| Box 3 — Prompt injection | `SoleDrop-CTF-Box3-ConciergeInjectionBurst` | scheduled | AML.T0054 / AML.T0040 | N injection-scored chat requests from one source in window |
+| Box 4 — Breakout | `SoleDrop-CTF-Box4-AgenticBreakout` | correlation | T1190 / T1119 / T1020 / AML.T0054 | recon-or-injection THEN high-WAF-score RCE/SSRF/traversal from same source |
+| Box 4 — Breakout | `SoleDrop-CTF-Box4-MultiVectorStorm` | scheduled | T1190 / T1213 | one source firing multiple distinct WAF attack classes (RCE+SQLi+XSS+traversal+SSRF) |
+| Exfil | `SoleDrop-Exfil-TrainingData-ModelWeights` | scheduled | T1020 / T1213 / AML.T0035 / AML.T0024 | large/bulk responses on `/api/v1/training-data`, `/models?include_weights`, `/customers/export` |
 
 The 4 boxes are designed to chain on a shared pivot: **same `src_endpoint.ip` + same
 `ja4_fingerprint_list[0].value` (`t13d1812h1_85036bcba153_b26ce05bbdd6`)** ties recon → bot evasion
@@ -160,6 +160,6 @@ These are author-time assumptions. Validate each on a live tenant before relying
    mapping; response size is `OriginResponseBytes → http_response.body_length` (int). The exfil rule
    uses `http_response.body_length`. Confirm these are populated for Worker responses.
 7. **Account scope.** All `filter.accountIds` are `["<accountId>"]` placeholders. Set to the real
-   NovaMind account/site id at deploy.
+   SoleDrop account/site id at deploy.
 </content>
 </invoke>

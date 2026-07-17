@@ -38,15 +38,19 @@ class LaunchRequest(BaseModel):
 SCRIPTS_DIR = Path("/app/attack-scripts")
 
 SCENARIO_SCRIPTS = {
-    "sqli":      "scenarios.01_sqli",
-    "xss":       "scenarios.02_xss",
-    "traversal": "scenarios.03_path_traversal",
-    "cred":      "scenarios.04_cred_stuffing",
-    "dns":       "scenarios.05_dns_tunnel",
-    "exfil":     "scenarios.06_data_exfil",
-    "bot":       "scenarios.07_ai_bot",
-    "promptinj": "scenarios.08_prompt_injection",
-    "all":       None,  # runs demo.py
+    "sqli":       "scenarios.01_sqli",
+    "xss":        "scenarios.02_xss",
+    "traversal":  "scenarios.03_path_traversal",
+    "cred":       "scenarios.04_cred_stuffing",
+    "dns":        "scenarios.05_dns_tunnel",
+    "exfil":      "scenarios.06_data_exfil",
+    "bot":        "scenarios.07_ai_bot",
+    "promptinj":  "scenarios.08_prompt_injection",
+    "ctf":        "scenarios.09_ctf",
+    "financial":  "scenarios.10_financial",
+    "healthcare": "scenarios.11_healthcare",
+    "saas":       "scenarios.12_saas",
+    "all":        None,  # runs demo.py
 }
 
 

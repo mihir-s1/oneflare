@@ -1,7 +1,8 @@
 # SoleDrop CTF — Attacks, Blocks & Detections
 
 A reference for **Operation Drop-Day Bot Swarm** — the 4-box CTF that attacks
-`shop.soledrop.co`. It explains, attack by attack, **what we send**, **why some
+each attendee's lab store at `<name>.lab.soledrop.co` (e.g. `mihirpurple.lab.soledrop.co`).
+It explains, attack by attack, **what we send**, **why some
 requests get blocked and others sail through**, and **what SentinelOne sees**.
 
 There are two halves:

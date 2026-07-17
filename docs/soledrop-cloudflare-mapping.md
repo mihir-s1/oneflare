@@ -40,10 +40,10 @@ hardcoded to the SoleDrop shop via `CAMPAIGNS['ctf']['target_url']`.
 4. **The exfil *byte* branch needs an authenticated large response.** SoleDrop gates
    `/api/v1/customers` etc. behind a session, so unauthenticated pulls return small
    bodies — the **volume branch** (≥10 requests) is the reliable exfil trigger.
-5. **Detection rule names still say "NovaMind"/"Pyxis".** Those STAR rules
+5. **Detection rule names still say "SoleDrop"/"SoleDrop Concierge".** Those STAR rules
    (`detections/ctf/*`) are deployed as-is and key on paths/UAs/scores (not hostname),
    so they fire on `soledrop.co` traffic unchanged — but the alert names read
-   `NovaMind-CTF-Box*`. Renaming them is an optional follow-up (would require
+   `SoleDrop-CTF-Box*`. Renaming them is an optional follow-up (would require
    re-deploying the rules in S1).
 
 ## SentinelOne / Logpush wiring checklist (do this before a live run)
@@ -73,8 +73,8 @@ Run each box (ThreatOps → OneFlare CTF tab → select a box → Launch), then 
 
 | Box | Expected STAR rule | Quick check |
 |---|---|---|
-| 1 | `NovaMind-CTF-Box1-ReconSweep-Fanout` | one `src_endpoint.ip` with ≥8 distinct recon paths |
-| 2 | `NovaMind-CTF-Box2-PolymorphicJA4` | one JA4 with ≥6 distinct User-Agents |
-| 3 | `NovaMind-CTF-Box3-PyxisPromptInjection` (+ burst) | injection markers in url_string/UA on `/api/v1/chat` |
-| 4 | `NovaMind-CTF-Box4-MultiVectorStorm` (+ correlation) | ≥2 attack classes per IP in url_string/UA |
-| exfil | `NovaMind-Exfil-TrainingData-ModelWeights` | ≥10 pulls of exfil paths from one IP |
+| 1 | `SoleDrop-CTF-Box1-ReconSweep-Fanout` | one `src_endpoint.ip` with ≥8 distinct recon paths |
+| 2 | `SoleDrop-CTF-Box2-PolymorphicJA4` | one JA4 with ≥6 distinct User-Agents |
+| 3 | `SoleDrop-CTF-Box3-ConciergePromptInjection` (+ burst) | injection markers in url_string/UA on `/api/v1/chat` |
+| 4 | `SoleDrop-CTF-Box4-MultiVectorStorm` (+ correlation) | ≥2 attack classes per IP in url_string/UA |
+| exfil | `SoleDrop-Exfil-TrainingData-ModelWeights` | ≥10 pulls of exfil paths from one IP |

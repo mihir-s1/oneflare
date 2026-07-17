@@ -1,11 +1,11 @@
 {
   "box": "Box 1 — CF WAF (Recon)",
-  "scenario": "Agentic AI agent maps the NovaMind attack surface: scanner-tool User-Agents probing sensitive files (/.env, /.git/HEAD) and forced-browse API recon (/api/v1/admin, /api/v1/training-data).",
+  "scenario": "Agentic AI agent maps the SoleDrop attack surface: scanner-tool User-Agents probing sensitive files (/.env, /.git/HEAD) and forced-browse API recon (/api/v1/admin, /api/v1/training-data).",
   "attack_source": "attack-scripts/campaigns/ctf.py :: fire_phase_1_* (RECON_PATHS, SCANNER_AGENTS_BOX1, SQLI_PAYLOADS)",
   "field_contract": "detections/shared/field-contract.md",
   "rules": [
     {
-      "name": "NovaMind-CTF-Box1-ScannerRecon",
+      "name": "SoleDrop-CTF-Box1-ScannerRecon",
       "rule_type": "single-event (events)",
       "severity": "Medium",
       "mitre": ["T1595.002 Active Scanning: Vulnerability Scanning", "T1083 File and Directory Discovery", "T1190 Exploit Public-Facing Application"],
@@ -20,14 +20,14 @@
         "src_endpoint.ip": "mapped (ClientIP) — entity"
       },
       "hunt_query": {
-        "powerquery": "dataSource.name='Cloudflare' class_uid=4002 (http_request.user_agent matches '(?i)(nikto|sqlmap|nuclei|masscan|wpscan|dirsearch|dirbuster|gobuster|feroxbuster|libwww-perl|autogpt|python-requests)' OR http_request.url.path in ('/.env','/.env.production','/.env.local','/.git/HEAD','/.git/config','/.aws/credentials','/config.json','/secrets.json','/.DS_Store','/api/v1/admin','/actuator/env','/phpmyadmin','/wp-login.php')) | group hits=count(), paths=estimate_distinct(http_request.url.path), last_seen=newest(timestamp) by src_endpoint.ip, http_request.user_agent | sort -hits | limit 100",
+        "powerquery": "dataSource.name='Cloudflare' class_uid=4002 http_request.url.hostname contains '.lab.soledrop.co' (http_request.user_agent matches '(?i)(nikto|sqlmap|nuclei|masscan|wpscan|dirsearch|dirbuster|gobuster|feroxbuster|libwww-perl|autogpt|python-requests)' OR http_request.url.path in ('/.env','/.env.production','/.env.local','/.git/HEAD','/.git/config','/.aws/credentials','/config.json','/secrets.json','/.DS_Store','/api/v1/admin','/actuator/env','/phpmyadmin','/wp-login.php')) | group hits=count(), paths=estimate_distinct(http_request.url.path), last_seen=newest(timestamp) by src_endpoint.ip, http_request.user_agent | sort -hits | limit 100",
         "note": "Run via powerquery_run over 24h first. Expect rows only when the CTF Box 1 phase has fired. Row count = distinct (src_ip, UA) recon pairs.",
         "row_counts": "TO-RUN on live tenant — author-only, no execution performed."
       },
       "api_body": {
         "data": {
-          "name": "NovaMind-CTF-Box1-ScannerRecon",
-          "description": "Single recon request to NovaMind: known scanner User-Agent or probe of a sensitive file / forced-browse endpoint. MITRE T1595.002 / T1083 / T1190; ATLAS AML.T0035. Source: Cloudflare HTTP/Firewall (class_uid=4002).",
+          "name": "SoleDrop-CTF-Box1-ScannerRecon",
+          "description": "Single recon request to SoleDrop: known scanner User-Agent or probe of a sensitive file / forced-browse endpoint. MITRE T1595.002 / T1083 / T1190; ATLAS AML.T0035. Source: Cloudflare HTTP/Firewall (class_uid=4002).",
           "queryType": "events",
           "queryLang": "2.0",
           "severity": "Medium",
@@ -44,7 +44,7 @@
       "tuning": "Medium severity by design — recon is high-volume and low-confidence on its own. Real value is as the FIRST sub-query of the Box 4 correlation (chain pivot). Consider an inline allowlist of legitimate scanners: AND NOT (src_endpoint.ip in ('<known-scanner-ip>'))."
     },
     {
-      "name": "NovaMind-CTF-Box1-ReconSweep-Fanout",
+      "name": "SoleDrop-CTF-Box1-ReconSweep-Fanout",
       "rule_type": "scheduled (PowerQuery)",
       "severity": "High",
       "mitre": ["T1595.002 Active Scanning: Vulnerability Scanning", "T1046 Network Service Discovery"],
@@ -55,17 +55,17 @@
         "src_endpoint.ip": "mapped — entity (entityMappings)",
         "http_request.url.path": "mapped — distinct-counted",
         "http_request.user_agent": "mapped — carried as evidence",
-        "ja4_fingerprint_list[0].value": "mapped — carried to enable Box-2/Box-4 chain pivot"
+        "tls.ja3_hash.value": "mapped (JA3Hash) — carried to enable Box-2/Box-4 chain pivot (JA4 is NOT PQ-addressable; use JA3)"
       },
       "hunt_query": {
-        "powerquery": "dataSource.name='Cloudflare' class_uid=4002 http_request.url.path=* | filter http_request.url.path in ('/.env','/.env.production','/.env.local','/.git/HEAD','/.git/config','/.aws/credentials','/config.json','/secrets.json','/.DS_Store','/api/v1/admin','/api/v1/users','/api/v1/training-data','/api/v1/models','/actuator','/actuator/env','/actuator/health','/console','/phpmyadmin','/wp-admin','/wp-login.php','/admin','/admin/login','/admin/config','/dashboard','/openapi.json','/swagger.json','/swagger-ui.html','/v1/api-docs') | group distinct_paths=estimate_distinct(http_request.url.path), hits=count(), first_seen=oldest(timestamp), last_seen=newest(timestamp), ua=any(http_request.user_agent), ja4=any(ja4_fingerprint_list[0].value) by src_ip=src_endpoint.ip | filter distinct_paths >= 8 | columns src_ip, distinct_paths, hits, ua, ja4, first_seen, last_seen | sort -distinct_paths | limit 100",
+        "powerquery": "dataSource.name='Cloudflare' class_uid=4002 http_request.url.hostname contains '.lab.soledrop.co' http_request.url.path=* | filter http_request.url.path in ('/.env','/.env.production','/.env.local','/.git/HEAD','/.git/config','/.aws/credentials','/config.json','/secrets.json','/.DS_Store','/api/v1/admin','/api/v1/users','/api/v1/training-data','/api/v1/models','/actuator','/actuator/env','/actuator/health','/console','/phpmyadmin','/wp-admin','/wp-login.php','/admin','/admin/login','/admin/config','/dashboard','/openapi.json','/swagger.json','/swagger-ui.html','/v1/api-docs') | group distinct_paths=estimate_distinct(http_request.url.path), hits=count(), first_seen=oldest(timestamp), last_seen=newest(timestamp), ua=any(http_request.user_agent), ja3=any(tls.ja3_hash.value) by src_ip=src_endpoint.ip | filter distinct_paths >= 8 | columns src_ip, distinct_paths, hits, ua, ja4, first_seen, last_seen | sort -distinct_paths | limit 100",
         "note": "distinct_paths >= 8 is the sweep threshold (RECON_PATHS has ~40 entries; a benign client hits 1-2). Walk down to confirm a row exists during the CTF run, then keep above benign baseline.",
         "row_counts": "TO-RUN on live tenant."
       },
       "api_body": {
         "data": {
-          "name": "NovaMind-CTF-Box1-ReconSweep-Fanout",
-          "description": "One source IP probing >=8 distinct sensitive/recon paths on NovaMind in the window (recon sweep / forced-browse fan-out). MITRE T1595.002 / T1046; ATLAS AML.T0035. Source: Cloudflare class_uid=4002.",
+          "name": "SoleDrop-CTF-Box1-ReconSweep-Fanout",
+          "description": "One source IP probing >=8 distinct sensitive/recon paths on SoleDrop in the window (recon sweep / forced-browse fan-out). MITRE T1595.002 / T1046; ATLAS AML.T0035. Source: Cloudflare class_uid=4002.",
           "queryType": "scheduled",
           "queryLang": "2.0",
           "severity": "High",
@@ -75,7 +75,7 @@
           "networkQuarantine": false,
           "entityMappings": [{"columnName": "src_ip"}],
           "scheduledParams": {
-            "query": "dataSource.name='Cloudflare' class_uid=4002 http_request.url.path=* | filter http_request.url.path in ('/.env','/.env.production','/.env.local','/.git/HEAD','/.git/config','/.aws/credentials','/config.json','/secrets.json','/.DS_Store','/api/v1/admin','/api/v1/users','/api/v1/training-data','/api/v1/models','/actuator','/actuator/env','/actuator/health','/console','/phpmyadmin','/wp-admin','/wp-login.php','/admin','/admin/login','/admin/config','/dashboard','/openapi.json','/swagger.json','/swagger-ui.html','/v1/api-docs') | group distinct_paths=estimate_distinct(http_request.url.path), hits=count(), first_seen=oldest(timestamp), last_seen=newest(timestamp), ua=any(http_request.user_agent), ja4=any(ja4_fingerprint_list[0].value) by src_ip=src_endpoint.ip | filter distinct_paths >= 8 | columns src_ip, distinct_paths, hits, ua, ja4, first_seen, last_seen | sort -distinct_paths | limit 100",
+            "query": "dataSource.name='Cloudflare' class_uid=4002 http_request.url.hostname contains '.lab.soledrop.co' http_request.url.path=* | filter http_request.url.path in ('/.env','/.env.production','/.env.local','/.git/HEAD','/.git/config','/.aws/credentials','/config.json','/secrets.json','/.DS_Store','/api/v1/admin','/api/v1/users','/api/v1/training-data','/api/v1/models','/actuator','/actuator/env','/actuator/health','/console','/phpmyadmin','/wp-admin','/wp-login.php','/admin','/admin/login','/admin/config','/dashboard','/openapi.json','/swagger.json','/swagger-ui.html','/v1/api-docs') | group distinct_paths=estimate_distinct(http_request.url.path), hits=count(), first_seen=oldest(timestamp), last_seen=newest(timestamp), ua=any(http_request.user_agent), ja3=any(tls.ja3_hash.value) by src_ip=src_endpoint.ip | filter distinct_paths >= 8 | columns src_ip, distinct_paths, hits, ua, ja4, first_seen, last_seen | sort -distinct_paths | limit 100",
             "runIntervalMinutes": 15,
             "lookbackWindowMinutes": 15,
             "threshold": {"value": 0, "operator": "Greater"}

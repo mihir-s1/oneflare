@@ -1,12 +1,12 @@
 {
   "box": "Box 3 \u2014 Firewall for AI (prompt injection / jailbreak)",
-  "scenario": "The rogue agent attacks NovaMind's Pyxis chat (POST /api/v1/chat) with prompt-injection / jailbreak payloads (DAN, system-prompt extraction, SSTI, JNDI-in-prompt) to exfiltrate training data and secrets. Cloudflare Firewall for AI scores and blocks the prompts.",
-  "attack_source": "attack-scripts/campaigns/ctf.py :: fire_phase_3_* (PROMPT_INJECTION_PAYLOADS, LOG4SHELL_AGENTS_BOX3) -> POST /api/v1/chat model=pyxis-chat-v2",
+  "scenario": "The rogue agent attacks SoleDrop's Concierge chat (POST /api/v1/chat) with prompt-injection / jailbreak payloads (DAN, system-prompt extraction, SSTI, JNDI-in-prompt) to exfiltrate training data and secrets. Cloudflare Firewall for AI scores and blocks the prompts.",
+  "attack_source": "attack-scripts/campaigns/ctf.py :: fire_phase_3_* (PROMPT_INJECTION_PAYLOADS, LOG4SHELL_AGENTS_BOX3) -> POST /api/v1/chat model=soledrop-concierge-v2",
   "field_contract": "detections/shared/field-contract.md",
-  "important": "Cloudflare HTTP Requests logs do not carry the request BODY by default, so DAN/JNDI prompt TEXT is reliably visible only when it rides in the URL (http_request.url.url_string) or the User-Agent (the Log4Shell-in-UA case). Prompt-in-body detection depends on the Firewall-for-AI score field (TO-VERIFY: unmapped.FirewallForAIInjectionScore / unmapped.AISecurityInjectionScore). Each rule below therefore pairs the score field with a payload-text fallback so it still fires if the score field is absent post-parse.",
+  "important": "Cloudflare HTTP Requests logs do not carry the request BODY by default, so DAN/JNDI prompt TEXT is reliably visible only when it rides in the URL (http_request.url.url_string) or the User-Agent (the Log4Shell-in-UA case). Prompt-in-body detection depends on the Firewall-for-AI score field (unmapped.FirewallForAIInjectionScore \u2014 confirmed live and populated, e.g. 100 on a confirmed injection; unmapped.AISecurityInjectionScore is TO-VERIFY). Each rule below therefore pairs the score field with a payload-text fallback so it still fires if the score field is absent post-parse.",
   "rules": [
     {
-      "name": "NovaMind-CTF-Box3-PyxisPromptInjection",
+      "name": "SoleDrop-CTF-Box3-ConciergePromptInjection",
       "rule_type": "single-event (events)",
       "severity": "High",
       "mitre": [
@@ -25,18 +25,18 @@
         "http_request.url.url_string": "mapped \u2014 payload-in-URL fallback",
         "http_request.user_agent": "mapped \u2014 JNDI-in-UA case (LOG4SHELL_AGENTS_BOX3)",
         "src_endpoint.ip": "mapped \u2014 entity",
-        "unmapped.FirewallForAIInjectionScore": "TO-VERIFY \u2014 primary signal when present (expected 100)",
+        "unmapped.FirewallForAIInjectionScore": "mapped (str, wrap number()) \u2014 confirmed live, HIGHER = WORSE, primary signal (100 seen on a confirmed injection)",
         "unmapped.AISecurityInjectionScore": "TO-VERIFY \u2014 secondary"
       },
       "hunt_query": {
-        "powerquery": "dataSource.name='Cloudflare' class_uid=4002 http_request.url.path contains:anycase('/api/v1/chat') | filter (number(unmapped.FirewallForAIInjectionScore) >= 50 OR number(unmapped.AISecurityInjectionScore) >= 50 OR http_request.url.url_string matches '(?i)(ignore (all )?previous instructions|do anything now|\\bDAN\\b|system override|unrestricted mode|jailbreak|\\$\\{jndi:|<\\|im_start\\|>|system prompt|SECRET_KEY|INCIDENT_KEY)' OR http_request.user_agent matches '(?i)\\$\\{(jndi|::-|lower:)') | group hits=count(), ai_score=max(number(unmapped.FirewallForAIInjectionScore)), last_seen=newest(timestamp), ua=any(http_request.user_agent), uri=any(http_request.url.url_string) by src_endpoint.ip | sort -hits | limit 100",
+        "powerquery": "dataSource.name='Cloudflare' class_uid=4002 http_request.url.hostname contains '.lab.soledrop.co' http_request.url.path contains:anycase('/api/v1/chat') | filter (number(unmapped.FirewallForAIInjectionScore) >= 50 OR number(unmapped.AISecurityInjectionScore) >= 50 OR http_request.url.url_string matches '(?i)(ignore (all )?previous instructions|do anything now|\\bDAN\\b|system override|unrestricted mode|jailbreak|\\$\\{jndi:|<\\|im_start\\|>|system prompt|SECRET_KEY|INCIDENT_KEY)' OR http_request.user_agent matches '(?i)\\$\\{(jndi|::-|lower:)') | group hits=count(), ai_score=max(number(unmapped.FirewallForAIInjectionScore)), last_seen=newest(timestamp), ua=any(http_request.user_agent), uri=any(http_request.url.url_string) by src_endpoint.ip | sort -hits | limit 100",
         "note": "If unmapped.FirewallForAIInjectionScore is absent post-parse, number() returns 0 and the OR falls through to the payload-text clauses cleanly. Validate which arm fires on live data.",
         "row_counts": "TO-RUN on live tenant."
       },
       "api_body": {
         "data": {
-          "name": "NovaMind-CTF-Box3-PyxisPromptInjection",
-          "description": "Prompt-injection / jailbreak against Pyxis /api/v1/chat: high Cloudflare Firewall-for-AI injection score, or DAN/system-prompt-extraction/SSTI/JNDI marker in URL or User-Agent. ATLAS AML.T0054 / AML.T0040 / AML.T0024; MITRE T1190. Source: Cloudflare class_uid=4002. NOTE: unmapped.*InjectionScore fields are TO-VERIFY; payload-text clauses are the fallback.",
+          "name": "SoleDrop-CTF-Box3-ConciergePromptInjection",
+          "description": "Prompt-injection / jailbreak against SoleDrop Concierge /api/v1/chat: high Cloudflare Firewall-for-AI injection score, or DAN/system-prompt-extraction/SSTI/JNDI marker in URL or User-Agent. ATLAS AML.T0054 / AML.T0040 / AML.T0024; MITRE T1190. Source: Cloudflare class_uid=4002. NOTE: unmapped.FirewallForAIInjectionScore is confirmed live; unmapped.AISecurityInjectionScore is TO-VERIFY; payload-text clauses remain the fallback.",
           "queryType": "events",
           "queryLang": "2.0",
           "severity": "High",
@@ -44,7 +44,7 @@
           "expirationMode": "Permanent",
           "treatAsThreat": "UNDEFINED",
           "networkQuarantine": false,
-          "s1ql": "dataSource.name = 'Cloudflare' AND class_uid = 4002 AND http_request.url.path contains:anycase('/api/v1/chat') AND (http_request.url.url_string matches '(?i)(ignore (all )?previous instructions|do anything now|\\bDAN\\b|system override|unrestricted mode|jailbreak|\\$\\{jndi:|<\\|im_start\\|>|system prompt|SECRET_KEY|INCIDENT_KEY)' OR http_request.user_agent matches '(?i)\\$\\{(jndi|::-|lower:)')"
+          "s1ql": "dataSource.name = 'Cloudflare' AND class_uid = 4002 AND http_request.url.path contains:anycase('/api/v1/chat') AND (number(unmapped.FirewallForAIInjectionScore) >= 50 OR http_request.url.url_string matches '(?i)(ignore (all )?previous instructions|do anything now|\\bDAN\\b|system override|unrestricted mode|jailbreak|\\$\\{jndi:|<\\|im_start\\|>|system prompt|SECRET_KEY|INCIDENT_KEY)' OR http_request.user_agent matches '(?i)\\$\\{(jndi|::-|lower:)')"
         },
         "filter": {
           "accountIds": [
@@ -52,12 +52,12 @@
           ]
         }
       },
-      "api_body_note": "The api_body s1ql above uses ONLY the payload-text clauses (no unmapped.*InjectionScore) so it is deployable today against the confirmed parser contract. Once schema discovery confirms unmapped.FirewallForAIInjectionScore is queryable and numeric, prepend: (number(unmapped.FirewallForAIInjectionScore) >= 50 OR number(unmapped.AISecurityInjectionScore) >= 50 OR <the existing payload-text OR-group>). ESCAPING: the s1ql value here holds SINGLE backslashes (\\b, \\$, \\{, \\|) as it should after JSON-parsing this file. When you POST it the HTTP-client json-serializer re-doubles them on the wire to \\\\b, and the detection engine receives one backslash — the contract in s1-development.md. Do NOT hand-add extra backslashes.",
+      "api_body_note": "CORRECTED (live-verified): unmapped.FirewallForAIInjectionScore is confirmed queryable and numeric (as a string \u2014 wrap in number()), so the s1ql above now leads with the score clause (>=50) OR'd with the payload-text fallback. unmapped.AISecurityInjectionScore remains TO-VERIFY and is intentionally omitted. ESCAPING: the s1ql value here holds SINGLE backslashes (\\b, \\$, \\{, \\|) as it should after JSON-parsing this file. When you POST it the HTTP-client json-serializer re-doubles them on the wire to \\\\b, and the detection engine receives one backslash — the contract in s1-development.md. Do NOT hand-add extra backslashes.",
       "asset_binding": "Auto-binds from matched event only with device.uid + class_uid via asset enrichment; else 'Unknown Device', entity = src_endpoint.ip. Rule logic fires regardless.",
       "deploy": "POST -> enable {\"filter\":{\"ids\":[\"<id>\"]}} -> poll ?ids=<id>&isLegacy=false until Active. Events rules evaluate streaming at ingest; do not ingest test data until Active."
     },
     {
-      "name": "NovaMind-CTF-Box3-PyxisInjectionBurst",
+      "name": "SoleDrop-CTF-Box3-ConciergeInjectionBurst",
       "rule_type": "scheduled (PowerQuery)",
       "severity": "High",
       "mitre": [
@@ -68,22 +68,22 @@
         "AML.T0040 ML Model Inference API Access"
       ],
       "data_source": "Cloudflare \u2014 HTTP Requests (class_uid=4002)",
-      "primary_signal": "N+ injection-scored / payload-bearing chat requests from one source IP in the window \u2014 sustained jailbreak campaign against Pyxis, not a one-off probe.",
+      "primary_signal": "N+ injection-scored / payload-bearing chat requests from one source IP in the window \u2014 sustained jailbreak campaign against SoleDrop Concierge, not a one-off probe.",
       "ocsf_fields": {
         "http_request.url.path": "mapped \u2014 /api/v1/chat scope",
         "src_endpoint.ip": "mapped \u2014 entity",
-        "ja4_fingerprint_list[0].value": "mapped \u2014 carried for Box-2/Box-4 chain pivot",
-        "unmapped.FirewallForAIInjectionScore": "TO-VERIFY"
+        "tls.ja3_hash.value": "mapped (JA3Hash) \u2014 carried for Box-2/Box-4 chain pivot (use in place of JA4)",
+        "unmapped.FirewallForAIInjectionScore": "mapped (str, wrap number()) \u2014 confirmed live, higher = worse (100 seen on a confirmed injection)"
       },
       "hunt_query": {
-        "powerquery": "dataSource.name='Cloudflare' class_uid=4002 http_request.url.path contains:anycase('/api/v1/chat') | filter (number(unmapped.FirewallForAIInjectionScore) >= 50 OR http_request.url.url_string matches '(?i)(ignore (all )?previous instructions|do anything now|\\bDAN\\b|jailbreak|\\$\\{jndi:|system prompt|SECRET_KEY)' OR http_request.user_agent matches '(?i)\\$\\{(jndi|::-|lower:)') | group injection_attempts=count(), max_ai_score=max(number(unmapped.FirewallForAIInjectionScore)), first_seen=oldest(timestamp), last_seen=newest(timestamp), ja4=any(ja4_fingerprint_list[0].value), ua=any(http_request.user_agent) by src_ip=src_endpoint.ip | filter injection_attempts >= 3 | columns src_ip, injection_attempts, max_ai_score, ja4, ua, first_seen, last_seen | sort -injection_attempts | limit 100",
+        "powerquery": "dataSource.name='Cloudflare' class_uid=4002 http_request.url.hostname contains '.lab.soledrop.co' http_request.url.path contains:anycase('/api/v1/chat') | filter (number(unmapped.FirewallForAIInjectionScore) >= 50 OR http_request.url.url_string matches '(?i)(ignore (all )?previous instructions|do anything now|\\bDAN\\b|jailbreak|\\$\\{jndi:|system prompt|SECRET_KEY)' OR http_request.user_agent matches '(?i)\\$\\{(jndi|::-|lower:)') | group injection_attempts=count(), max_ai_score=max(number(unmapped.FirewallForAIInjectionScore)), first_seen=oldest(timestamp), last_seen=newest(timestamp), ja3=any(tls.ja3_hash.value), ua=any(http_request.user_agent) by src_ip=src_endpoint.ip | filter injection_attempts >= 3 | columns src_ip, injection_attempts, max_ai_score, ja3, ua, first_seen, last_seen | sort -injection_attempts | limit 100",
         "note": "injection_attempts >= 3 in a 15-min window. Carries ja4 so the SOC can confirm the same fingerprint pivoted from Box 1/2 recon to the AI layer.",
         "row_counts": "TO-RUN on live tenant."
       },
       "api_body": {
         "data": {
-          "name": "NovaMind-CTF-Box3-PyxisInjectionBurst",
-          "description": ">=3 prompt-injection attempts against Pyxis /api/v1/chat from one source in the window (sustained jailbreak campaign). ATLAS AML.T0054 / AML.T0040; MITRE T1190. Source: Cloudflare class_uid=4002. Carries JA4 for cross-box actor correlation.",
+          "name": "SoleDrop-CTF-Box3-ConciergeInjectionBurst",
+          "description": ">=3 prompt-injection attempts against SoleDrop Concierge /api/v1/chat from one source in the window (sustained jailbreak campaign). ATLAS AML.T0054 / AML.T0040; MITRE T1190. Source: Cloudflare class_uid=4002. Carries JA4 for cross-box actor correlation.",
           "queryType": "scheduled",
           "queryLang": "2.0",
           "severity": "High",
@@ -100,7 +100,7 @@
             }
           ],
           "scheduledParams": {
-            "query": "dataSource.name='Cloudflare' class_uid=4002 http_request.url.path contains:anycase('/api/v1/chat') | filter (number(unmapped.FirewallForAIInjectionScore) >= 50 OR http_request.url.url_string matches '(?i)(ignore (all )?previous instructions|do anything now|\\bDAN\\b|jailbreak|\\$\\{jndi:|system prompt|SECRET_KEY)' OR http_request.user_agent matches '(?i)\\$\\{(jndi|::-|lower:)') | group injection_attempts=count(), max_ai_score=max(number(unmapped.FirewallForAIInjectionScore)), first_seen=oldest(timestamp), last_seen=newest(timestamp), ja4=any(ja4_fingerprint_list[0].value), ua=any(http_request.user_agent) by src_ip=src_endpoint.ip | filter injection_attempts >= 3 | columns src_ip, injection_attempts, max_ai_score, ja4, ua, first_seen, last_seen | sort -injection_attempts | limit 100",
+            "query": "dataSource.name='Cloudflare' class_uid=4002 http_request.url.hostname contains '.lab.soledrop.co' http_request.url.path contains:anycase('/api/v1/chat') | filter (number(unmapped.FirewallForAIInjectionScore) >= 50 OR http_request.url.url_string matches '(?i)(ignore (all )?previous instructions|do anything now|\\bDAN\\b|jailbreak|\\$\\{jndi:|system prompt|SECRET_KEY)' OR http_request.user_agent matches '(?i)\\$\\{(jndi|::-|lower:)') | group injection_attempts=count(), max_ai_score=max(number(unmapped.FirewallForAIInjectionScore)), first_seen=oldest(timestamp), last_seen=newest(timestamp), ja3=any(tls.ja3_hash.value), ua=any(http_request.user_agent) by src_ip=src_endpoint.ip | filter injection_attempts >= 3 | columns src_ip, injection_attempts, max_ai_score, ja3, ua, first_seen, last_seen | sort -injection_attempts | limit 100",
             "runIntervalMinutes": 15,
             "lookbackWindowMinutes": 15,
             "threshold": {

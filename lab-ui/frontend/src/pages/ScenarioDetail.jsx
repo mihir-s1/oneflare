@@ -166,6 +166,37 @@ function RichSiemDetection({ scenario }) {
         </div>
       </div>
 
+      {/* Additional detections — other rules verified alongside the headline query */}
+      {s.additionalDetections && s.additionalDetections.length > 0 && (
+        <div className="rounded-xl bg-[#1a0a2e] border border-[#2d1b4e] p-5">
+          <SectionHeader icon={Shield} title={`Additional Detections (${s.additionalDetections.length})`} accent="green" />
+          <p className="text-xs text-slate-500 -mt-2 mb-3 leading-relaxed">
+            The headline query above is one of several rules verified together. Each of these fired independently against live data.
+          </p>
+          <div className="space-y-2">
+            {s.additionalDetections.map((d, i) => (
+              <details key={i} className="group rounded-lg border border-[#2d1b4e] bg-white/3 open:bg-white/5">
+                <summary className="flex items-center gap-3 p-3 cursor-pointer list-none">
+                  <ChevronRight className="w-4 h-4 text-slate-500 shrink-0 transition-transform group-open:rotate-90" />
+                  <span className="text-sm font-semibold text-slate-200">{d.name}</span>
+                  <Badge type="severity" value={d.severity} />
+                  <span className="text-xs font-mono text-orange-400/80">{d.mitre}</span>
+                </summary>
+                <div className="px-3 pb-3 pl-10 space-y-2.5">
+                  <p className="text-sm text-slate-400 leading-relaxed">{d.description}</p>
+                  <div className="flex items-center justify-end" onClick={(e) => e.stopPropagation()}>
+                    <CopyButton text={d.query} label="Copy Query" />
+                  </div>
+                  <pre className="code-block text-xs leading-relaxed overflow-x-auto">
+                    <code className="text-purple-300">{d.query}</code>
+                  </pre>
+                </div>
+              </details>
+            ))}
+          </div>
+        </div>
+      )}
+
       {/* How the query works */}
       <div className="rounded-xl bg-[#1a0a2e] border border-[#2d1b4e] p-5">
         <SectionHeader icon={Layers} title="How the query works" />
