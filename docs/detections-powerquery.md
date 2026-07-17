@@ -3,10 +3,16 @@
 Detection rule bodies — one per CTF box — for the Cloudflare Logpush data in
 SentinelOne. Companion to [attacks-and-detections.md](attacks-and-detections.md).
 
-> **✅ Verified against live data** (2026-07-10, `usea1-partners`, 7-day window,
-> via the LRQ API). Every query below was run against the real
-> `shop.soledrop.co` events and returned the attacker IPs. Field names, the WAF
-> score direction, and thresholds are all confirmed — this is no longer a draft.
+> **✅ Verified logic** (2026-07-10, `usea1-partners`, 7-day window, via the LRQ
+> API). Every query was validated against live `soledrop.co` Cloudflare data and
+> returned the attacker IPs; field names, WAF score direction, and thresholds are
+> confirmed.
+>
+> **🎯 Per-attendee targeting.** Each attendee's lab lives at
+> `<name>.lab.soledrop.co` (e.g. `mihirpurple.lab.soledrop.co`). The rules scope
+> with `http_request.url.hostname contains '.lab.soledrop.co'`, so one rule set
+> covers **every** attendee automatically. To scope to *just your own* lab,
+> narrow it to `contains '<name>.lab.soledrop.co'`.
 
 > **📌 Deployed** to the **OneFlare** site (`siteId 2433185103040607397`,
 > account `Cloudflare - NFR`) as scheduled PowerQuery detections, 60/60 min,
@@ -22,6 +28,10 @@ SentinelOne. Companion to [attacks-and-detections.md](attacks-and-detections.md)
 >
 > Enable: `PUT /web/api/v2.1/cloud-detection/rules/enable` with
 > `{"filter":{"ids":[…],"siteIds":["2433185103040607397"]}}`.
+>
+> **Note:** the *deployed* rule bodies still target `shop.soledrop.co`. Re-point
+> them to `contains '.lab.soledrop.co'` (the bodies below) once attendee-lab
+> traffic is flowing — flipping earlier would leave them matching nothing.
 
 ---
 
@@ -34,10 +44,10 @@ and reality differed from the first-draft guesses in five important ways:
    sourcetype filter returned 0 rows; the data lives under
    `dataSource.name='Cloudflare'`.
 2. **Your account already has a Cloudflare Gateway / Zero-Trust integration**
-   feeding the *same* `dataSource.name='Cloudflare'` (≈374k events/7d). Our shop
+   feeding the *same* `dataSource.name='Cloudflare'` (≈374k events/7d). Each lab's
    Logpush is a small slice of that. **Every rule must filter
-   `http_request.url.hostname='shop.soledrop.co'`** or it drowns in Gateway noise.
-   The two shop datasets are `dataSource.cloudflare_dataset='HTTP Requests'` and
+   `http_request.url.hostname contains '.lab.soledrop.co'`** or it drowns in Gateway noise.
+   The two datasets are `dataSource.cloudflare_dataset='HTTP Requests'` and
    `='Firewall events'`.
 3. **Fields are OCSF, not Cloudflare PascalCase** (see map below).
 4. **JA4 isn't queryable** — the parser stores it as `ja4_fingerprint_list[0].value`,
@@ -56,7 +66,7 @@ and reality differed from the first-draft guesses in five important ways:
 | Logical field | OCSF path | Notes |
 |---|---|---|
 | Source IP | `src_endpoint.ip` | client IP as Cloudflare sees it |
-| Host | `http_request.url.hostname` | filter to `shop.soledrop.co` |
+| Host | `http_request.url.hostname` | filter to `*.lab.soledrop.co` (per-attendee) |
 | Dataset | `dataSource.cloudflare_dataset` | `HTTP Requests` / `Firewall events` |
 | Path | `http_request.url.path` | |
 | Full URL | `http_request.url.url_string` | carries the query string (markers) |
@@ -77,7 +87,7 @@ and reality differed from the first-draft guesses in five important ways:
 MITRE **T1595.002** · single-pipeline (alert-safe)
 
 ```text
-dataSource.name='Cloudflare' http_request.url.hostname='shop.soledrop.co' src_endpoint.ip=*
+dataSource.name='Cloudflare' http_request.url.hostname contains '.lab.soledrop.co' src_endpoint.ip=*
 | group distinct_paths = estimate_distinct(http_request.url.path),
         scanner_hits   = count(http_request.user_agent matches 'nikto|nuclei|sqlmap|masscan|wpscan|dirsearch|dirbuster|gobuster|feroxbuster|libwww-perl|python-requests|curl/'),
         total          = count(),
@@ -99,7 +109,7 @@ dataSource.name='Cloudflare' http_request.url.hostname='shop.soledrop.co' src_en
 MITRE **T1595 / T1036.005** · single-pipeline (alert-safe)
 
 ```text
-dataSource.name='Cloudflare' dataSource.cloudflare_dataset='HTTP Requests' http_request.url.hostname='shop.soledrop.co' tls.ja3_hash.value=*
+dataSource.name='Cloudflare' dataSource.cloudflare_dataset='HTTP Requests' http_request.url.hostname contains '.lab.soledrop.co' tls.ja3_hash.value=*
 | group ua_variety = estimate_distinct(http_request.user_agent),
         requests    = count(),
         ip_spread   = estimate_distinct(src_endpoint.ip),
@@ -125,7 +135,7 @@ ad-hoc hunting only.)
 MITRE **ATLAS AML.T0051** · single-pipeline
 
 ```text
-dataSource.name='Cloudflare' http_request.url.hostname='shop.soledrop.co' http_request.url.path='/api/v1/chat'
+dataSource.name='Cloudflare' http_request.url.hostname contains '.lab.soledrop.co' http_request.url.path='/api/v1/chat'
 | let inj = number(unmapped.FirewallForAIInjectionScore)
 | group chat_hits = count(),
         max_injection = max(inj),
@@ -144,7 +154,7 @@ dataSource.name='Cloudflare' http_request.url.hostname='shop.soledrop.co' http_r
 MITRE **T1110.004** · single-pipeline
 
 ```text
-dataSource.name='Cloudflare' http_request.url.hostname='shop.soledrop.co' http_request.url.path='/login' http_request.http_method='POST'
+dataSource.name='Cloudflare' http_request.url.hostname contains '.lab.soledrop.co' http_request.url.path='/login' http_request.http_method='POST'
 | group login_posts = count(), last_seen = max(timestamp)
   by src_endpoint.ip
 | filter login_posts >= 8
@@ -165,7 +175,7 @@ pulls.** MITRE **T1190 + T1119/T1020** · uses **`inner join`** (alert-safe).
 | inner join
   (
     // (A) exploit attempts — WAF attack score in the malicious band (1–20)
-    dataSource.name='Cloudflare' dataSource.cloudflare_dataset='HTTP Requests' http_request.url.hostname='shop.soledrop.co'
+    dataSource.name='Cloudflare' dataSource.cloudflare_dataset='HTTP Requests' http_request.url.hostname contains '.lab.soledrop.co'
     | let sqli = number(unmapped.WAFSQLiAttackScore), rce = number(unmapped.WAFRCEAttackScore)
     | filter (sqli > 0 && sqli <= 20) || (rce > 0 && rce <= 20)
     | group exploit_hits = count(), worst_sqli = min(sqli), worst_rce = min(rce),
@@ -175,7 +185,7 @@ pulls.** MITRE **T1190 + T1119/T1020** · uses **`inner join`** (alert-safe).
   ),
   (
     // (B) bulk exfil pulls of sensitive endpoints
-    dataSource.name='Cloudflare' http_request.url.hostname='shop.soledrop.co' http_request.url.path in ('/api/v1/customers','/api/v1/training-data','/api/v1/users','/api/v1/models')
+    dataSource.name='Cloudflare' http_request.url.hostname contains '.lab.soledrop.co' http_request.url.path in ('/api/v1/customers','/api/v1/training-data','/api/v1/users','/api/v1/models')
     | group exfil_hits = count(), exfil_paths = array_agg_distinct(http_request.url.path, 5)
       by src_endpoint.ip
     | filter exfil_hits >= 3
