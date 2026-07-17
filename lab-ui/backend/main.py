@@ -53,6 +53,15 @@ SCENARIO_SCRIPTS = {
     "all":        None,  # runs demo.py
 }
 
+# Requests fired per box/phase for the campaign scenarios (ctf/financial/
+# healthcare/saas) — set as CAMPAIGN_COUNT for their scenarios.NN_x.py runner.
+# The single-technique scenarios don't read this env var.
+CAMPAIGN_VOLUME_COUNTS = {
+    "low":    5,
+    "medium": 15,
+    "high":   30,
+}
+
 
 # ---------------------------------------------------------------------------
 # Server-side, non-sensitive run configuration.
@@ -136,6 +145,10 @@ async def run_scenario(websocket: WebSocket, scenario_id: str):
     jitter = config.get("jitter")
     env["ATTACK_DELAY"]  = str(delay  if delay  is not None else SERVER_CONFIG["delay"])
     env["ATTACK_JITTER"] = str(jitter if jitter is not None else SERVER_CONFIG["jitter"])
+    # Campaign scenarios (ctf/financial/healthcare/saas) fire CAMPAIGN_COUNT
+    # requests per box/phase — the single-technique scenarios don't read this.
+    volume = config.get("campaign_volume") or "medium"
+    env["CAMPAIGN_COUNT"] = str(CAMPAIGN_VOLUME_COUNTS.get(volume, CAMPAIGN_VOLUME_COUNTS["medium"]))
     doh = config.get("gateway_doh_url") or SERVER_CONFIG["gateway_doh_url"]
     if doh:
         env["CF_GATEWAY_DOH_URL"] = doh

@@ -286,6 +286,10 @@ export default function ScenarioDetail() {
   const [duration, setDuration] = useState(null)
   const wsRef = useRef(null)
 
+  // Campaign scenarios (ctf/financial/healthcare/saas) run a variable number
+  // of requests per box/phase — only those runners read CAMPAIGN_COUNT.
+  const [campaignVolume, setCampaignVolume] = useState('medium')
+
   // Non-sensitive run config is served by the backend (GET /api/config) so a
   // fresh browser is pre-configured and anyone can run scenarios with zero setup.
   // A per-user localStorage value still overrides the server default.
@@ -353,6 +357,7 @@ export default function ScenarioDetail() {
         delay: parseFloat(attackDelay),
         jitter: parseFloat(attackJitter),
         gateway_doh_url: gatewayDohUrl,
+        campaign_volume: campaignVolume,
       }
       ws.send(JSON.stringify(config))
     }
@@ -632,6 +637,37 @@ export default function ScenarioDetail() {
                 </div>
               </div>
             </div>
+
+            {/* Volume — campaign scenarios only (requests fired per box/phase) */}
+            {scenario.category === 'Campaign' && (
+              <div className="rounded-xl bg-[#1a0a2e] border border-[#2d1b4e] p-4">
+                <h4 className="text-sm font-semibold text-slate-300 mb-3">Volume</h4>
+                <div className="grid grid-cols-3 gap-1.5">
+                  {[
+                    { val: 'low',    label: 'Low',    sub: '~5 / box' },
+                    { val: 'medium', label: 'Medium', sub: '~15 / box' },
+                    { val: 'high',   label: 'High',   sub: '~30 / box' },
+                  ].map(({ val, label, sub }) => (
+                    <button
+                      key={val}
+                      onClick={() => setCampaignVolume(val)}
+                      disabled={isRunning}
+                      className={`
+                        rounded-lg border-2 py-2 text-center transition-all duration-150
+                        ${campaignVolume === val
+                          ? 'border-pink-500 text-pink-400 bg-pink-500/10'
+                          : 'border-[#2d1b4e] text-slate-500 hover:border-slate-600'
+                        }
+                        ${isRunning ? 'opacity-50 cursor-not-allowed' : 'cursor-pointer'}
+                      `}
+                    >
+                      <div className="text-sm font-semibold">{label}</div>
+                      <div className="text-[10px] text-slate-400">{sub}</div>
+                    </button>
+                  ))}
+                </div>
+              </div>
+            )}
 
             {!isConfigured && (
               <div className="rounded-xl border border-red-500/20 bg-red-500/5 p-4 flex items-center gap-3">
