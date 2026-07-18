@@ -807,8 +807,11 @@ export default function ScenarioDetail() {
         {/* === RUN ATTACK (with the merged-in scenario overview on top) === */}
         {activeTab === 'run' && (
           <div className="space-y-4">
-            {/* Quick Run — sits above the overview so the attack can be fired
-                the moment the scenario opens, without scrolling. */}
+            {/* Scenario context — what this attack is and why it matters */}
+            <ScenarioOverviewBlock scenario={scenario} />
+
+            {/* Quick Run — sits just below the overview so the attack can be
+                fired without scrolling down to the config/terminal section. */}
             <div className="flex items-center gap-3">
               <button
                 onClick={handleRun}
@@ -829,9 +832,6 @@ export default function ScenarioDetail() {
                 )}
               </button>
             </div>
-
-            {/* Scenario context — what this attack is and why it matters */}
-            <ScenarioOverviewBlock scenario={scenario} />
 
             {/* Warning banner */}
             <div className="rounded-xl border border-orange-500/30 bg-orange-500/5 p-4 flex gap-3">
