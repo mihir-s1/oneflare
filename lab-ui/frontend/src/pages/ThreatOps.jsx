@@ -812,6 +812,9 @@ export default function ThreatOps() {
       phase:    indMode === 'preseed' ? indPhase : 'all',
       volume:   indVolume,
       target_subdomain: effectiveRunTarget('campaign'),
+      // BYOC: run the campaign against your own Cloudflare host (verified server-side).
+      shop_url: localStorage.getItem('oneflare_shop_url') || '',
+      cf_api_token: localStorage.getItem('oneflare_cf_api_token') || '',
     }
 
     try {
@@ -868,6 +871,9 @@ export default function ThreatOps() {
       phase:    ctfMode === 'preseed' ? ctfPhase : 'all',
       volume:   ctfVolume,
       target_subdomain: effectiveRunTarget('campaign'),
+      // BYOC: run the campaign against your own Cloudflare host (verified server-side).
+      shop_url: localStorage.getItem('oneflare_shop_url') || '',
+      cf_api_token: localStorage.getItem('oneflare_cf_api_token') || '',
     }
 
     try {

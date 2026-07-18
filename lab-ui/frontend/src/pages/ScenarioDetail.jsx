@@ -462,6 +462,9 @@ export default function ScenarioDetail() {
           gateway_doh_url: gatewayDohUrl,
           target_subdomain: targetSubdomain,
           campaign_volume: campaignVolume,
+          // Sent so the backend can verify BYOC targets (a host in a Cloudflare
+          // zone this token controls) before running against a non-lab host.
+          cf_api_token: ls('oneflare_cf_api_token'),
         }
         ws.send(JSON.stringify(config))
       }

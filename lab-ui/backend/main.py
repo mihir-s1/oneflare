@@ -43,6 +43,12 @@ class LaunchRequest(BaseModel):
     # registered tenant host (validated server-side); ignored for non-admins
     # (forced to their own). None = the admin's default (one-flare target).
     target_subdomain: Optional[str] = None
+    # BYOC: run against the caller's OWN Cloudflare host, verified server-side
+    # against their CF token (see _byoc_decision). A custom shop_url triggers it.
+    shop_url: Optional[str] = None
+    portal_url: Optional[str] = None
+    api_url: Optional[str] = None
+    cf_api_token: Optional[str] = None
 
 
 class LabRegisterRequest(BaseModel):
@@ -354,6 +360,168 @@ async def test_connection(body: dict):
     return {"ok": data.get("success", False), "result": data.get("result")}
 
 
+# ── Bring-Your-Own-Cloudflare (BYOC) targeting + Logpush configuration ────────
+# The shared console pins lab users to their assigned *.lab.soledrop.co subdomain.
+# BYOC lets any logged-in user ALSO target hosts inside a Cloudflare zone THEIR OWN
+# API token controls — verified here so the console can never be pointed at a
+# domain the caller can't authenticate to.
+_LAB_HOST_SUFFIX = (os.getenv("LAB_DOMAIN") or "lab.soledrop.co").lower().lstrip(".")
+
+
+def _hostname(url: str) -> str:
+    h = (url or "").strip().lower()
+    h = h.replace("https://", "").replace("http://", "")
+    return h.split("/")[0].split("?")[0].split(":")[0]
+
+
+def _is_lab_or_ref_host(url: str) -> bool:
+    """True for a host that belongs to the shared lab (a *.lab.soledrop.co subdomain
+    or one of the baked reference targets). Runs against these use the session-
+    authoritative path; anything else is a BYOC custom target that must be verified."""
+    h = _hostname(url)
+    if not h:
+        return True
+    if h == _LAB_HOST_SUFFIX or h.endswith("." + _LAB_HOST_SUFFIX):
+        return True
+    for u in (SERVER_CONFIG.get("shop_url"), SERVER_CONFIG.get("portal_url"), SERVER_CONFIG.get("api_url")):
+        if _hostname(u) and _hostname(u) == h:
+            return True
+    return False
+
+
+async def _cf_zone_names_for_token(token: str):
+    """Zone names the CF API token can access (lowercased), or None if the token is
+    invalid — proof of control: you can only hold a token for zones in your account."""
+    import httpx
+    names = []
+    try:
+        async with httpx.AsyncClient(timeout=20) as client:
+            v = await client.get(
+                "https://api.cloudflare.com/client/v4/user/tokens/verify",
+                headers={"Authorization": f"Bearer {token}"},
+            )
+            if not (v.json() or {}).get("success"):
+                return None
+            page = 1
+            while page <= 20:
+                r = await client.get(
+                    "https://api.cloudflare.com/client/v4/zones",
+                    headers={"Authorization": f"Bearer {token}"},
+                    params={"per_page": 50, "page": page},
+                )
+                d = r.json() or {}
+                if not d.get("success"):
+                    break
+                names += [(z.get("name") or "").lower() for z in (d.get("result") or []) if z.get("name")]
+                info = d.get("result_info") or {}
+                if page >= int(info.get("total_pages") or 1):
+                    break
+                page += 1
+    except Exception:
+        return None
+    return names
+
+
+def _host_controlled(url: str, zone_names) -> bool:
+    h = _hostname(url)
+    return bool(h) and any(h == z or h.endswith("." + z) for z in (zone_names or []))
+
+
+async def _byoc_decision(cookies: dict, hosts_map: dict, cf_token: str):
+    """Classify a run's targets in multi-user mode. `hosts_map` = {shop,portal,api}.
+    Returns (kind, message, safe_targets):
+      ('lab', None, None)  → no custom host → caller uses the session-authoritative
+                             path (a user can't attack another's site).
+      ('byoc', None, dict) → the caller's own CF token controls every custom host.
+                             `safe_targets` is {shop,portal,api} with EVERY role set to
+                             a VERIFIED controlled host — any lab/ref/blank role is
+                             coerced to the primary controlled host, so a BYOC run can
+                             never touch a lab tenant or the shared reference target.
+      ('error', str, None) → a custom host the caller may not run against (reason in str)."""
+    custom = {k: v for k, v in (hosts_map or {}).items() if v and not _is_lab_or_ref_host(v)}
+    if not custom:
+        return ("lab", None, None)
+    if not _session_from_cookies(cookies):
+        return ("error", "Please log in to run scenarios.", None)
+    if not cf_token:
+        return ("error", "To target your own Cloudflare host, add your Cloudflare API token in Settings → Cloudflare Configuration first.", None)
+    zone_names = await _cf_zone_names_for_token(cf_token)
+    if zone_names is None:
+        return ("error", "Your Cloudflare API token is invalid or expired.", None)
+    uncontrolled = sorted({_hostname(v) for v in custom.values() if not _host_controlled(v, zone_names)})
+    if uncontrolled:
+        return ("error", f"Your Cloudflare token doesn't control: {', '.join(uncontrolled)}. You can only target hosts in zones your token manages.", None)
+    primary = next(iter(custom.values()))
+    safe = {}
+    for role in ("shop", "portal", "api"):
+        v = (hosts_map or {}).get(role)
+        safe[role] = v if (v and _host_controlled(v, zone_names)) else primary
+    return ("byoc", None, safe)
+
+
+@app.post("/api/cloudflare/logpush/configure")
+async def configure_logpush(body: dict):
+    """Create Logpush jobs on the caller's OWN Cloudflare zone that ship HTTP +
+    firewall events to their OWN SentinelOne HEC. Single-tenant / BYOC self-service:
+    the CF token + S1 HEC creds are supplied per call and used transiently (never
+    stored). The CF token needs Logpush:Edit + access to the zone. S1's marketplace
+    HEC raw collector is Splunk-HEC-compatible (auth `Authorization: Splunk <token>`),
+    which is exactly what Cloudflare's native Splunk Logpush destination sends."""
+    import httpx, uuid
+    from urllib.parse import quote
+    token = (body.get("cf_api_token") or "").strip()
+    zone_id = (body.get("cf_zone_id") or "").strip()
+    hec_url = (body.get("s1_hec_url") or "").strip()
+    hec_token = (body.get("s1_hec_token") or "").strip()
+    datasets = body.get("datasets") or ["http_requests", "firewall_events"]
+    missing = [k for k, v in (("cf_api_token", token), ("cf_zone_id", zone_id),
+                              ("s1_hec_url", hec_url), ("s1_hec_token", hec_token)) if not v]
+    if missing:
+        return {"ok": False, "error": f"Missing required field(s): {', '.join(missing)}"}
+
+    host = _hostname(hec_url)
+    dest_host = f"{host}:443"
+    auth = quote(f"Splunk {hec_token}", safe="")
+    FIELDS = {
+        "http_requests": ["ClientIP", "ClientRequestHost", "ClientRequestMethod", "ClientRequestPath",
+                          "ClientRequestURI", "EdgeResponseStatus", "EdgeResponseBytes", "RayID",
+                          "ClientRequestUserAgent", "SecurityAction", "SecurityRuleID",
+                          "WAFAttackScore", "WAFSQLiAttackScore", "WAFXSSAttackScore", "WAFRCEAttackScore"],
+        "firewall_events": ["Action", "ClientIP", "ClientRequestHTTPHost", "ClientRequestPath",
+                           "Datetime", "RayID", "RuleID", "Source", "UserAgent"],
+    }
+    results = []
+    try:
+        async with httpx.AsyncClient(timeout=30) as client:
+            for ds in datasets:
+                channel = str(uuid.uuid4())
+                dest = (f"splunk://{dest_host}/services/collector/raw?channel={channel}"
+                        f"&insecure-skip-verify=false&sourcetype=cloudflare_{ds}"
+                        f"&header_Authorization={auth}")
+                job = {
+                    "name": f"oneflare-{ds}-s1",
+                    "dataset": ds,
+                    "output_options": {"field_names": FIELDS.get(ds, []), "timestamp_format": "rfc3339"},
+                    "destination_conf": dest,
+                    "enabled": True,
+                }
+                r = await client.post(
+                    f"https://api.cloudflare.com/client/v4/zones/{zone_id}/logpush/jobs",
+                    headers={"Authorization": f"Bearer {token}"},
+                    json=job,
+                )
+                d = r.json() or {}
+                results.append({
+                    "dataset": ds,
+                    "ok": bool(d.get("success")),
+                    "id": (d.get("result") or {}).get("id"),
+                    "errors": d.get("errors"),
+                })
+    except Exception as exc:
+        return {"ok": False, "error": f"Cloudflare API call failed: {exc}", "jobs": results}
+    return {"ok": bool(results) and all(x["ok"] for x in results), "jobs": results}
+
+
 @app.websocket("/ws/run/{scenario_id}")
 async def run_scenario(websocket: WebSocket, scenario_id: str):
     await websocket.accept()
@@ -383,27 +551,45 @@ async def run_scenario(websocket: WebSocket, scenario_id: str):
     if doh:
         env["CF_GATEWAY_DOH_URL"] = doh
 
-    # Multi-user console: login-gate execution and resolve the target
-    # AUTHORITATIVELY from the session — the client-sent shop_url/portal_url/api_url
-    # are NOT trusted here (a user must never be able to attack another's site).
+    # Multi-user console: login-gate execution and resolve the target via one of two
+    # SAFE paths:
+    #   • Lab target (a *.lab.soledrop.co subdomain / the reference host) → resolved
+    #     AUTHORITATIVELY from the session (a user can't attack another's site).
+    #   • BYOC target (the caller's OWN Cloudflare host) → allowed ONLY after verifying
+    #     the caller's OWN CF API token controls that host's zone. This is how the
+    #     shared console extends beyond the lab without becoming an open launcher.
     if _multi_user_mode():
-        try:
-            target, _session = _resolve_run_target(dict(websocket.cookies), config.get("target_subdomain"))
-        except PermissionError:
-            await websocket.send_text(json.dumps({"type": "error", "message": "Please log in to run scenarios."}))
+        kind, msg, safe = await _byoc_decision(
+            dict(websocket.cookies),
+            {"shop": config.get("shop_url"), "portal": config.get("portal_url"), "api": config.get("api_url")},
+            (config.get("cf_api_token") or "").strip(),
+        )
+        if kind == "error":
+            await websocket.send_text(json.dumps({"type": "error", "message": msg}))
             await websocket.close()
             return
-        except ValueError as exc:
-            await websocket.send_text(json.dumps({"type": "error", "message": str(exc)}))
-            await websocket.close()
-            return
-        if target:
-            env["SHOP_URL_OVERRIDE"] = env["PORTAL_URL_OVERRIDE"] = env["API_URL_OVERRIDE"] = target
-        else:
-            # Admin with no selection → the original one-flare targets.
-            env["SHOP_URL_OVERRIDE"]   = SERVER_CONFIG["shop_url"]
-            env["PORTAL_URL_OVERRIDE"] = SERVER_CONFIG["portal_url"]
-            env["API_URL_OVERRIDE"]    = SERVER_CONFIG["api_url"]
+        if kind == "byoc":
+            env["SHOP_URL_OVERRIDE"]   = safe["shop"]
+            env["PORTAL_URL_OVERRIDE"] = safe["portal"]
+            env["API_URL_OVERRIDE"]    = safe["api"]
+        if kind == "lab":
+            try:
+                target, _session = _resolve_run_target(dict(websocket.cookies), config.get("target_subdomain"))
+            except PermissionError:
+                await websocket.send_text(json.dumps({"type": "error", "message": "Please log in to run scenarios."}))
+                await websocket.close()
+                return
+            except ValueError as exc:
+                await websocket.send_text(json.dumps({"type": "error", "message": str(exc)}))
+                await websocket.close()
+                return
+            if target:
+                env["SHOP_URL_OVERRIDE"] = env["PORTAL_URL_OVERRIDE"] = env["API_URL_OVERRIDE"] = target
+            else:
+                # Admin with no selection → the original one-flare targets.
+                env["SHOP_URL_OVERRIDE"]   = SERVER_CONFIG["shop_url"]
+                env["PORTAL_URL_OVERRIDE"] = SERVER_CONFIG["portal_url"]
+                env["API_URL_OVERRIDE"]    = SERVER_CONFIG["api_url"]
 
     if scenario_id == "all":
         cmd = [sys.executable, str(SCRIPTS_DIR / "demo.py")]
@@ -493,13 +679,26 @@ async def campaign_launch(request: Request, body: LaunchRequest):
     target = None
     owner = None
     if _multi_user_mode():
-        try:
-            target, session = _resolve_run_target(dict(request.cookies), body.target_subdomain)
-        except PermissionError:
-            raise HTTPException(status_code=401, detail="Please log in to run campaigns.")
-        except ValueError as exc:
-            raise HTTPException(status_code=400, detail=str(exc))
-        owner = session["email"]
+        cookies = dict(request.cookies)
+        kind, msg, safe = await _byoc_decision(
+            cookies,
+            {"shop": body.shop_url, "portal": body.portal_url, "api": body.api_url},
+            (body.cf_api_token or "").strip(),
+        )
+        if kind == "error":
+            raise HTTPException(status_code=401 if "log in" in msg.lower() else 400, detail=msg)
+        if kind == "byoc":
+            session = _session_from_cookies(cookies)
+            target = safe["shop"]
+            owner = session["email"]
+        else:
+            try:
+                target, session = _resolve_run_target(cookies, body.target_subdomain)
+            except PermissionError:
+                raise HTTPException(status_code=401, detail="Please log in to run campaigns.")
+            except ValueError as exc:
+                raise HTTPException(status_code=400, detail=str(exc))
+            owner = session["email"]
     try:
         loop = asyncio.get_event_loop()
         _ce.launch(owner, body.campaign, body.mode, body.phase, body.volume, loop, target=target)

@@ -2,7 +2,7 @@ import { useState, useEffect } from 'react'
 import {
   ChevronDown, ChevronUp, Shield, Globe, Eye, EyeOff,
   CheckCircle, XCircle, Download, Upload, Info, Zap, AlertTriangle,
-  History as HistoryIcon, Trash2, Clock, X, Fingerprint, Target, LogOut,
+  History as HistoryIcon, Trash2, Clock, X, Fingerprint, Target, LogOut, Share2,
 } from 'lucide-react'
 import Badge from '../components/Badge.jsx'
 import { SCENARIOS } from '../data/scenarios.js'
@@ -22,6 +22,8 @@ const STORAGE_KEYS = {
   s1_api_url:          'oneflare_s1_api_url',
   s1_api_token:        'oneflare_s1_api_token',
   s1_mcp_url:          'oneflare_s1_mcp_url',
+  s1_hec_url:          'oneflare_s1_hec_url',
+  s1_hec_token:        'oneflare_s1_hec_token',
   attack_delay:        'oneflare_attack_delay',
   attack_jitter:       'oneflare_attack_jitter',
 }
@@ -548,6 +550,105 @@ function DefaultRunTargetSection() {
   )
 }
 
+// ── Configure Logpush ────────────────────────────────────────────────────────
+// Single-tenant / BYOC self-service: point the caller's OWN Cloudflare zone's
+// security logs at their OWN SentinelOne HEC. Uses the CF token + Zone ID from the
+// Cloudflare Configuration section; sends the S1 HEC endpoint + token to the
+// backend, which creates the Logpush jobs via the Cloudflare API.
+function ConfigureLogpushSection({ settings, onChange }) {
+  const [busy, setBusy] = useState(false)
+  const [result, setResult] = useState(null)
+  const ready = settings.cf_api_token && settings.cf_zone_id && settings.s1_hec_url && settings.s1_hec_token
+
+  async function configure() {
+    setBusy(true); setResult(null)
+    try {
+      const r = await fetch('/api/cloudflare/logpush/configure', {
+        method: 'POST',
+        headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify({
+          cf_api_token: settings.cf_api_token,
+          cf_zone_id: settings.cf_zone_id,
+          s1_hec_url: settings.s1_hec_url,
+          s1_hec_token: settings.s1_hec_token,
+        }),
+      })
+      setResult(await r.json())
+    } catch (e) {
+      setResult({ ok: false, error: String(e) })
+    } finally {
+      setBusy(false)
+    }
+  }
+
+  return (
+    <Section title="Configure Logpush" icon={Share2} defaultOpen={false}>
+      <div className="space-y-4">
+        <div className="rounded-lg bg-white/3 border border-white/10 p-3 flex gap-2 text-xs text-slate-400">
+          <Info className="w-4 h-4 text-blue-400 shrink-0 mt-0.5" />
+          <span>
+            Ship your own Cloudflare zone's security logs to your own SentinelOne. Uses the{' '}
+            <span className="font-mono text-slate-300">CF API Token</span> +{' '}
+            <span className="font-mono text-slate-300">Zone ID</span> from Cloudflare Configuration above
+            (the token needs <span className="font-mono text-slate-300">Logpush:Edit</span>). Creates two
+            Logpush jobs — HTTP requests + firewall events — pointed at your S1 HEC.
+          </span>
+        </div>
+        <Field
+          label="S1 HEC Ingest URL"
+          fieldKey="s1_hec_url"
+          value={settings.s1_hec_url}
+          onChange={onChange}
+          placeholder="https://ingest.us1.sentinelone.net"
+          note="Your SentinelOne marketplace HEC endpoint (the region ingest host)."
+        />
+        <Field
+          label="S1 HEC Token"
+          fieldKey="s1_hec_token"
+          value={settings.s1_hec_token}
+          onChange={onChange}
+          showToggle
+          placeholder="HEC write token"
+        />
+        <div className="flex items-center gap-3 pt-1 flex-wrap">
+          <button onClick={configure} disabled={!ready || busy} className="btn-orange text-sm disabled:opacity-40">
+            {busy ? (
+              <span className="flex items-center gap-2">
+                <span className="w-3.5 h-3.5 border-2 border-white/60 border-t-transparent rounded-full animate-spin" />
+                Configuring…
+              </span>
+            ) : 'Configure Logpush'}
+          </button>
+          {!ready && <span className="text-xs text-slate-500">Fill the CF token + Zone ID (above) and both S1 HEC fields.</span>}
+        </div>
+        {result && (result.ok ? (
+          <div className="rounded-lg border border-green-500/20 bg-green-500/5 p-3 flex gap-2 text-sm text-green-300">
+            <CheckCircle className="w-4 h-4 text-green-400 shrink-0 mt-0.5" />
+            <div>
+              Created {result.jobs?.length || 0} Logpush job(s): {(result.jobs || []).map(j => j.dataset).join(', ')} → your S1 HEC.
+              <div className="text-xs text-slate-400 mt-1">
+                Cloudflare validates the destination on creation. If events don't arrive, confirm the HEC token and that your S1 marketplace HEC accepts the Splunk raw collector.
+              </div>
+            </div>
+          </div>
+        ) : (
+          <div className="rounded-lg border border-red-500/20 bg-red-500/5 p-3 text-sm text-red-300">
+            <div className="flex gap-2">
+              <XCircle className="w-4 h-4 text-red-400 shrink-0 mt-0.5" />
+              <div>
+                {result.error || 'Some Logpush jobs failed.'}
+                {(result.jobs || []).filter(j => !j.ok).map((j, i) => (
+                  <div key={i} className="text-xs font-mono text-red-400/90 mt-1 break-all">{j.dataset}: {JSON.stringify(j.errors)}</div>
+                ))}
+              </div>
+            </div>
+          </div>
+        ))}
+      </div>
+    </Section>
+  )
+}
+
 export default function Settings() {
   const [settings, setSettings] = useState(loadSettings)
   const [testStatus, setTestStatus] = useState(null) // null | 'testing' | 'ok' | 'fail'
@@ -785,6 +886,9 @@ export default function Settings() {
           </div>
         </div>
       </Section>
+
+      {/* Configure Logpush — CF zone → your own S1 HEC */}
+      <ConfigureLogpushSection settings={settings} onChange={handleChange} />
 
       {/* Run History */}
       <Section title="Run History" icon={HistoryIcon}>

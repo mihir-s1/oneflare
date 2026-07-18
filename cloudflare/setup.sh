@@ -89,6 +89,36 @@ for worker in shop portal api; do
   success "Patched workers/$worker/wrangler.toml → $worker.$CLOUDFLARE_DOMAIN"
 done
 
+# ── Step 1b: Ensure INCIDENT_KV namespace + inject its id ────────────────────
+# The 3 workers bind INCIDENT_KV via a `placeholder_incident_kv_id` in their
+# wrangler.toml — without a real namespace id, `wrangler deploy` (Step 3) fails.
+# Create the namespace once (idempotent) and sed its id into all three tomls.
+step "Step 1b/7 — Ensuring INCIDENT_KV namespace"
+KV_TITLE="novamind-incident-kv"
+KV_ID=$(cf_api POST "/accounts/$CLOUDFLARE_ACCOUNT_ID/storage/kv/namespaces" \
+  --data "{\"title\":\"$KV_TITLE\"}" | python3 -c "
+import sys,json
+d=json.load(sys.stdin)
+print(d['result']['id'] if d.get('success') else '')
+")
+if [[ -z "$KV_ID" ]]; then
+  # Likely already exists → look it up by title.
+  KV_ID=$(cf_api GET "/accounts/$CLOUDFLARE_ACCOUNT_ID/storage/kv/namespaces?per_page=100" | python3 -c "
+import sys,json
+d=json.load(sys.stdin)
+print(next((n['id'] for n in d.get('result',[]) if n.get('title')=='$KV_TITLE'), ''))
+")
+fi
+if [[ -z "$KV_ID" ]]; then
+  warn "Could not create/find the INCIDENT_KV namespace (token needs Workers KV Storage:Edit). Worker deploy will fail on the placeholder id — create it by hand: 'npx wrangler kv namespace create INCIDENT_KV', then paste the id over 'placeholder_incident_kv_id' in workers/{shop,portal,api}/wrangler.toml."
+else
+  for worker in shop portal api; do
+    TOML="$SCRIPT_DIR/workers/$worker/wrangler.toml"
+    sed -i.bak "s/placeholder_incident_kv_id/$KV_ID/g" "$TOML" && rm "$TOML.bak"
+  done
+  success "INCIDENT_KV ready ($KV_ID) → injected into 3 wrangler.toml files"
+fi
+
 # ── Step 2: Claim workers.dev subdomain ──────────────────────────────────────
 step "Step 2/7 — Claiming workers.dev subdomain"
 
