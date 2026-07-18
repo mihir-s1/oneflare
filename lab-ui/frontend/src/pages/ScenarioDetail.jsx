@@ -158,6 +158,35 @@ function RichSiemDetection({ scenario, detection }) {
   const query = detection?.query ?? s.query
   return (
     <div className="space-y-5">
+      {/* The detection query — leads the tab; this is the point of the page */}
+      <div className="rounded-xl bg-[#1a0a2e] border border-[#2d1b4e] p-5">
+        <div className="flex items-center justify-between mb-3">
+          <SectionHeader icon={TerminalIcon} title="PowerQuery Detection" />
+          <CopyButton text={query} label="Copy Query" />
+        </div>
+        <pre className="code-block text-xs leading-relaxed overflow-x-auto">
+          <code className="text-purple-300">{query}</code>
+        </pre>
+        <p className="text-xs text-slate-500 mt-2 leading-relaxed">
+          Scheduled-rule body for the SentinelOne SDL. Runs on a cadence over the lookback window and
+          emits one row per offending (source, zone).
+        </p>
+        <div className="mt-3 rounded-lg border border-amber-500/25 bg-amber-500/5 p-3 flex gap-2.5">
+          <AlertTriangle className="w-4 h-4 text-amber-400 shrink-0 mt-0.5" />
+          <div className="text-xs text-slate-400 leading-relaxed">
+            <span className="text-amber-300 font-medium">Deploy as a Scheduled rule</span>{' '}
+            (<code className="text-amber-300/90">queryType: scheduled</code>,{' '}
+            <code className="text-amber-300/90">queryLang: 2.0</code>). This is a PowerQuery — the{' '}
+            <code className="text-amber-300/90">|</code> pipe is rejected by a single-event{' '}
+            <span className="font-medium">STAR</span> rule with{' '}
+            <span className="italic">“Don't understand [|] — try enclosing it in quotes.”</span>{' '}
+            It requires aggregation (<code>group</code> / <code>count</code>), which only scheduled
+            rules run. Rule of thumb: a query with a <code className="text-amber-300/90">|</code> →
+            Scheduled rule; no pipes → STAR/single-event.
+          </div>
+        </div>
+      </div>
+
       {/* Meta row */}
       <div className="grid grid-cols-1 md:grid-cols-4 gap-3">
         <MetaCard label="Detection Rule" value={ruleName} mono />
@@ -211,35 +240,6 @@ function RichSiemDetection({ scenario, detection }) {
               <div className="text-sm text-slate-300 leading-snug">{m.name}</div>
             </a>
           ))}
-        </div>
-      </div>
-
-      {/* The detection query */}
-      <div className="rounded-xl bg-[#1a0a2e] border border-[#2d1b4e] p-5">
-        <div className="flex items-center justify-between mb-3">
-          <SectionHeader icon={TerminalIcon} title="PowerQuery Detection" />
-          <CopyButton text={query} label="Copy Query" />
-        </div>
-        <pre className="code-block text-xs leading-relaxed overflow-x-auto">
-          <code className="text-purple-300">{query}</code>
-        </pre>
-        <p className="text-xs text-slate-500 mt-2 leading-relaxed">
-          Scheduled-rule body for the SentinelOne SDL. Runs on a cadence over the lookback window and
-          emits one row per offending (source, zone).
-        </p>
-        <div className="mt-3 rounded-lg border border-amber-500/25 bg-amber-500/5 p-3 flex gap-2.5">
-          <AlertTriangle className="w-4 h-4 text-amber-400 shrink-0 mt-0.5" />
-          <div className="text-xs text-slate-400 leading-relaxed">
-            <span className="text-amber-300 font-medium">Deploy as a Scheduled rule</span>{' '}
-            (<code className="text-amber-300/90">queryType: scheduled</code>,{' '}
-            <code className="text-amber-300/90">queryLang: 2.0</code>). This is a PowerQuery — the{' '}
-            <code className="text-amber-300/90">|</code> pipe is rejected by a single-event{' '}
-            <span className="font-medium">STAR</span> rule with{' '}
-            <span className="italic">“Don't understand [|] — try enclosing it in quotes.”</span>{' '}
-            It requires aggregation (<code>group</code> / <code>count</code>), which only scheduled
-            rules run. Rule of thumb: a query with a <code className="text-amber-300/90">|</code> →
-            Scheduled rule; no pipes → STAR/single-event.
-          </div>
         </div>
       </div>
 
@@ -665,27 +665,6 @@ export default function ScenarioDetail() {
             </h1>
             <p className="text-slate-400 mt-1.5 leading-relaxed">{scenario.shortDescription}</p>
           </div>
-
-          {/* Quick Run — fire the attack without scrolling to the Run Attack tab.
-              Mirrors the primary run button; disabled until a CF domain is set. */}
-          <button
-            onClick={() => { setActiveTab('run'); handleRun() }}
-            disabled={!isConfigured && !isRunning}
-            title={!isConfigured ? 'Set your Cloudflare domain in Settings first' : undefined}
-            className={`shrink-0 flex items-center gap-2 px-4 py-2.5 rounded-lg font-semibold text-sm transition-all duration-200 ${
-              isRunning
-                ? 'bg-red-500/20 text-red-400 border border-red-500/30 hover:bg-red-500/30'
-                : isConfigured
-                ? 'bg-gradient-to-r from-orange-500 to-orange-600 text-white hover:from-orange-600 hover:to-orange-700 shadow-lg shadow-orange-500/20'
-                : 'bg-white/5 text-slate-500 cursor-not-allowed border border-slate-700'
-            }`}
-          >
-            {isRunning ? (
-              <><Square className="w-4 h-4" /> Stop Attack</>
-            ) : (
-              <><Play className="w-4 h-4" /> Run Attack</>
-            )}
-          </button>
         </div>
       </div>
 
@@ -715,7 +694,6 @@ export default function ScenarioDetail() {
         {/* === SIEM DETECTION (with the merged-in attack mechanics on top) === */}
         {activeTab === 'siem' && (
           <div className="space-y-5">
-            <AttackFlowBlock scenario={scenario} />
             {scenario.siem ? (
               <RichSiemDetection scenario={scenario} detection={detection} />
             ) : (
@@ -747,6 +725,9 @@ export default function ScenarioDetail() {
             </div>
           </div>
             )}
+
+            {/* Attack mechanics live at the bottom now — the detection leads. */}
+            <AttackFlowBlock scenario={scenario} />
           </div>
         )}
 
@@ -826,6 +807,29 @@ export default function ScenarioDetail() {
         {/* === RUN ATTACK (with the merged-in scenario overview on top) === */}
         {activeTab === 'run' && (
           <div className="space-y-4">
+            {/* Quick Run — sits above the overview so the attack can be fired
+                the moment the scenario opens, without scrolling. */}
+            <div className="flex items-center gap-3">
+              <button
+                onClick={handleRun}
+                disabled={!isConfigured && !isRunning}
+                title={!isConfigured ? 'Set your Cloudflare domain in Settings first' : undefined}
+                className={`flex items-center gap-2 px-5 py-2.5 rounded-lg font-semibold text-sm transition-all duration-200 ${
+                  isRunning
+                    ? 'bg-red-500/20 text-red-400 border border-red-500/30 hover:bg-red-500/30'
+                    : isConfigured
+                    ? 'bg-gradient-to-r from-orange-500 to-orange-600 text-white hover:from-orange-600 hover:to-orange-700 shadow-lg shadow-orange-500/20'
+                    : 'bg-white/5 text-slate-500 cursor-not-allowed border border-slate-700'
+                }`}
+              >
+                {isRunning ? (
+                  <><Square className="w-4 h-4" /> Stop Attack</>
+                ) : (
+                  <><Play className="w-4 h-4" /> Run Attack</>
+                )}
+              </button>
+            </div>
+
             {/* Scenario context — what this attack is and why it matters */}
             <ScenarioOverviewBlock scenario={scenario} />
 
