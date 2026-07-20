@@ -837,7 +837,9 @@ export default function Settings() {
               These are the <span className="text-slate-300 font-semibold">attack targets</span> — every scenario fires at one
               of these three hosts (DNS Tunneling is the exception; it uses the Gateway DoH URL below). They default to{' '}
               <span className="font-mono">shop|portal|api.&lt;Domain&gt;</span> — set them to point the scripts at your own
-              Cloudflare-proxied hosts. On the shared console, a custom host must be one your Cloudflare API token controls.
+              Cloudflare-proxied hosts (on the shared console, a custom host must be one your Cloudflare API token controls).
+              Each host must expose the endpoints its attacks hit (see each field). Easiest: deploy the lab's own
+              shop / portal / api Workers via <span className="font-mono">cloudflare/setup.sh</span>, which already implement them all.
             </span>
           </div>
           <Field
@@ -846,7 +848,10 @@ export default function Settings() {
             value={settings.shop_url}
             onChange={handleChange}
             placeholder={`https://shop.${settings.cf_domain || 'one-flare.com'}`}
-            note="Attacked by: SQL Injection, XSS, and Path Traversal — plus the storefront login in Credential Attacks. Multi-phase campaigns (CTF / Financial / Healthcare / SaaS) hit it too."
+            note={<>
+              <span className="text-slate-400">Attacked by:</span> SQL Injection, XSS, Path Traversal (+ the storefront login in Credential Attacks); campaigns too.{' '}
+              <span className="text-slate-400">Must be a public storefront exposing:</span> a search endpoint <span className="font-mono">/search?q=</span> that reflects the query, product pages <span className="font-mono">/products/&lt;id&gt;</span>, a review <span className="font-mono">POST /reviews</span>, and <span className="font-mono">POST /login</span> — all Cloudflare-proxied with WAF.
+            </>}
           />
           <Field
             label="Portal URL"
@@ -854,7 +859,10 @@ export default function Settings() {
             value={settings.portal_url}
             onChange={handleChange}
             placeholder={`https://portal.${settings.cf_domain || 'one-flare.com'}`}
-            note="Attacked by: Credential Stuffing / Brute Force against the Access (ZTNA) login. Multi-phase campaigns hit it too."
+            note={<>
+              <span className="text-slate-400">Attacked by:</span> Credential Stuffing / Brute Force; campaigns too.{' '}
+              <span className="text-slate-400">Must be a login-gated portal exposing:</span> an authentication endpoint <span className="font-mono">POST /login</span> that returns <span className="font-mono">401/403</span> on bad credentials — ideally fronted by Cloudflare Access (ZTNA) so failed logins land in Access audit logs.
+            </>}
           />
           <Field
             label="API URL"
@@ -862,7 +870,10 @@ export default function Settings() {
             value={settings.api_url}
             onChange={handleChange}
             placeholder={`https://api.${settings.cf_domain || 'one-flare.com'}`}
-            note="Attacked by: Data Exfiltration, AI / Bot Scraping, and Prompt Injection. Multi-phase campaigns hit it too."
+            note={<>
+              <span className="text-slate-400">Attacked by:</span> Data Exfiltration, AI / Bot Scraping, Prompt Injection; campaigns too.{' '}
+              <span className="text-slate-400">Must be a REST API exposing:</span> <span className="font-mono">POST /api/v1/auth/login</span> (returns a token), bulk data routes <span className="font-mono">/api/v1/customers/export</span> &amp; <span className="font-mono">/api/v1/orders</span>, enumerable <span className="font-mono">/api/v1/models</span> and <span className="font-mono">/admin</span>, and a chat endpoint <span className="font-mono">POST /api/v1/chat</span> — Cloudflare-proxied with WAF (+ Firewall for AI for injection scoring).
+            </>}
           />
 
           {/* Test connection */}
