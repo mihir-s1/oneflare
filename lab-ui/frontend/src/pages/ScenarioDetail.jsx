@@ -810,29 +810,6 @@ export default function ScenarioDetail() {
             {/* Scenario context — what this attack is and why it matters */}
             <ScenarioOverviewBlock scenario={scenario} />
 
-            {/* Quick Run — sits just below the overview so the attack can be
-                fired without scrolling down to the config/terminal section. */}
-            <div className="flex items-center gap-3">
-              <button
-                onClick={handleRun}
-                disabled={!isConfigured && !isRunning}
-                title={!isConfigured ? 'Set your Cloudflare domain in Settings first' : undefined}
-                className={`flex items-center gap-2 px-5 py-2.5 rounded-lg font-semibold text-sm transition-all duration-200 ${
-                  isRunning
-                    ? 'bg-red-500/20 text-red-400 border border-red-500/30 hover:bg-red-500/30'
-                    : isConfigured
-                    ? 'bg-gradient-to-r from-orange-500 to-orange-600 text-white hover:from-orange-600 hover:to-orange-700 shadow-lg shadow-orange-500/20'
-                    : 'bg-white/5 text-slate-500 cursor-not-allowed border border-slate-700'
-                }`}
-              >
-                {isRunning ? (
-                  <><Square className="w-4 h-4" /> Stop Attack</>
-                ) : (
-                  <><Play className="w-4 h-4" /> Run Attack</>
-                )}
-              </button>
-            </div>
-
             {/* Warning banner */}
             <div className="rounded-xl border border-orange-500/30 bg-orange-500/5 p-4 flex gap-3">
               <AlertTriangle className="w-5 h-5 text-orange-400 shrink-0 mt-0.5" />
