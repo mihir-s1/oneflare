@@ -736,6 +736,12 @@ export default function ScenarioDetail() {
           <div className="space-y-5">
             {haPlaybook && (
               <>
+                {/* Diagram — lead with the workflow itself */}
+                <div className="rounded-xl bg-[#1a0a2e] border border-[#2d1b4e] p-5">
+                  <SectionHeader icon={GitBranch} title={`Hyperautomation workflow — ${haPlaybook.title}`} />
+                  <HAPlaybookDiagram diagram={haPlaybook.diagram} />
+                </div>
+
                 {/* Why this response */}
                 <div className="rounded-xl bg-[#1a0a2e] border border-[#2d1b4e] p-5">
                   <SectionHeader icon={GitBranch} title="Why this response" accent="orange" />
@@ -759,12 +765,6 @@ export default function ScenarioDetail() {
                     Configure these under Hyperautomation &rarr; Integrations before importing —
                     integration-backed actions won't run without a bound connection.
                   </p>
-                </div>
-
-                {/* Diagram */}
-                <div className="rounded-xl bg-[#1a0a2e] border border-[#2d1b4e] p-5">
-                  <SectionHeader icon={GitBranch} title={`Hyperautomation workflow — ${haPlaybook.title}`} />
-                  <HAPlaybookDiagram diagram={haPlaybook.diagram} />
                 </div>
 
                 {/* Workflow JSON (collapsible, lazy-loaded) */}
