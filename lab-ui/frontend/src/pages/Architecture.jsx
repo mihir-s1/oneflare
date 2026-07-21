@@ -381,7 +381,7 @@ const WORKERS = [
   {
     name: 'SoleDrop Shop Worker',
     description: 'Single Worker serving every attack surface — web, API, and portal — at your per-user subdomain <name>.lab.soledrop.co. Self-contained with its own /api/incident + KV; attacks flip /status and degrade checkout/admin.',
-    url: 'https://shop-soledrop-worker.workers.dev',
+    url: 'https://shop.soledrop.co/',
     routes: ['/search', '/products', '/reviews', '/login', '/dashboard', '/admin', '/api/v1/auth/login', '/api/v1/customers/export', '/api/v1/cart', '/api/v1/checkout', '/api/v1/chat', '/api/incident', '/status'],
     color: 'red',
     borderClass: 'border-red-500/30',
