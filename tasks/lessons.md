@@ -1,5 +1,28 @@
 # Lessons
 
+## 2026-07-20 — HA native actions: use the catalog's CANONICAL `data`, don't reconstruct it
+**Context:** After setting `integration_id`, the nodes rendered native but FAILED at runtime
+(400s). Root causes, all from reconstructing the action instead of copying the catalog's real
+`data`:
+- **`url` must keep the `<@/path@>` link form** where the catalog has it (Cloudflare
+  `<@/client/v4/user/firewall/access_rules/rules@>`, AbuseIPDB `<@/api/v2/check@>`, Slack
+  `<@/api/chat.postMessage@>`). Clones stripped it to a plain path → failure. NOT universal —
+  the S1 `unifiedalerts/graphql` note/verdict actions use a PLAIN url and work; match whatever
+  the catalog's `data.url` shows for that action id.
+- **Params use `{parameter_name, parameter_value}`, NOT `{key, value}`.** Wrong shape = the
+  param isn't sent → e.g. `"queryId: Missing data for required field"`.
+- **Placeholder tokens** `<<ip>>`/`<<queryId>>` in the catalog `data` are inputs — replace with
+  the workflow expression (`{{local_var.src_ip}}`, `{{create-power-query.body.data.queryId}}`).
+- **S1 PowerQuery from HA:** the catalog `Create A Power Query` (`/dv/init-query`) does NOT work
+  on this tenant. Working flow (verified live): POST `<@/web/api/v2.1/dv/events/pq@>` {query,
+  fromDate, toDate} → returns `data.queryId` + `data.status` (RUNNING); then GET
+  `<@/web/api/v2.1/dv/events/pq-ping@>?queryId=…` until `data.status=="FINISHED"`. Results are a
+  **2D array** (`data.data` rows + `data.columns`) — you CANNOT reference a named field like
+  `body.data[0].failed_logins`; index the array or don't reference it in messages.
+- Make enrichment nodes `continue_on_fail:true` (best-effort; don't abort the response).
+**Rule:** for every native node, copy the catalog action's `data` (`url`, `parameters`,
+`payload`, `headers`) verbatim and only substitute the `<<…>>` inputs. See docs/s1-ha-integration-catalog.md. [[native-golden-playbooks]]
+
 ## 2026-07-20 — HA native action needs `integration_id` SET, not null (else renders as HTTP)
 **Context:** The golden workflow imported but 6 nodes (Cloudflare block, S1 PowerQuery triad,
 VirusTotal, AbuseIPDB) showed as plain **"Send HTTP Request"** on the canvas, not native

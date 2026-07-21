@@ -856,6 +856,44 @@ export default function ScenarioDetail() {
             {/* Scenario context — what this attack is and why it matters */}
             <ScenarioOverviewBlock scenario={scenario} />
 
+            {/* Run controls — target selection + run/stop + clear on one line, ABOVE the disclaimer */}
+            <div className="flex items-center gap-3 flex-wrap">
+              <div className="flex-1 min-w-[240px]"><TargetBar scope="scenario" /></div>
+              <button
+                onClick={handleRun}
+                disabled={!isConfigured && !isRunning}
+                className={`flex items-center gap-2 px-5 py-2.5 rounded-lg font-semibold text-sm transition-all duration-200 shrink-0 ${
+                  isRunning
+                    ? 'bg-red-500/20 text-red-400 border border-red-500/30 hover:bg-red-500/30'
+                    : isConfigured
+                    ? 'bg-gradient-to-r from-orange-500 to-orange-600 text-white hover:from-orange-600 hover:to-orange-700 shadow-lg shadow-orange-500/20'
+                    : 'bg-white/5 text-slate-500 cursor-not-allowed border border-slate-700'
+                }`}
+              >
+                {isRunning ? (
+                  <><Square className="w-4 h-4" /> Stop Attack</>
+                ) : (
+                  <><Play className="w-4 h-4" /> Run Attack</>
+                )}
+              </button>
+              {(isRunning || runDone) && (
+                <button
+                  onClick={() => { setLines([]); setRunDone(false); setExitCode(null) }}
+                  className="btn-ghost text-xs shrink-0"
+                  disabled={isRunning}
+                >
+                  Clear
+                </button>
+              )}
+              {needsLogin && (
+                <span className="text-xs text-amber-300 flex items-center gap-1.5">
+                  <AlertTriangle className="w-3.5 h-3.5" />
+                  Please log in to run scenarios.
+                  <Link to="/admin" className="text-orange-400 underline hover:no-underline">Log in →</Link>
+                </span>
+              )}
+            </div>
+
             {/* Warning banner */}
             <div className="rounded-xl border border-orange-500/30 bg-orange-500/5 p-4 flex gap-3">
               <AlertTriangle className="w-5 h-5 text-orange-400 shrink-0 mt-0.5" />
@@ -936,46 +974,6 @@ export default function ScenarioDetail() {
                 </p>
               </div>
             )}
-
-            {/* Run target — who/where this attack fires against */}
-            <TargetBar scope="scenario" />
-
-            {/* Run button */}
-            <div className="flex items-center gap-3">
-              <button
-                onClick={handleRun}
-                disabled={!isConfigured && !isRunning}
-                className={`flex items-center gap-2 px-5 py-2.5 rounded-lg font-semibold text-sm transition-all duration-200 ${
-                  isRunning
-                    ? 'bg-red-500/20 text-red-400 border border-red-500/30 hover:bg-red-500/30'
-                    : isConfigured
-                    ? 'bg-gradient-to-r from-orange-500 to-orange-600 text-white hover:from-orange-600 hover:to-orange-700 shadow-lg shadow-orange-500/20'
-                    : 'bg-white/5 text-slate-500 cursor-not-allowed border border-slate-700'
-                }`}
-              >
-                {isRunning ? (
-                  <><Square className="w-4 h-4" /> Stop Attack</>
-                ) : (
-                  <><Play className="w-4 h-4" /> Run Attack</>
-                )}
-              </button>
-              {(isRunning || runDone) && (
-                <button
-                  onClick={() => { setLines([]); setRunDone(false); setExitCode(null) }}
-                  className="btn-ghost text-xs"
-                  disabled={isRunning}
-                >
-                  Clear
-                </button>
-              )}
-              {needsLogin && (
-                <span className="text-xs text-amber-300 flex items-center gap-1.5">
-                  <AlertTriangle className="w-3.5 h-3.5" />
-                  Please log in to run scenarios.
-                  <Link to="/admin" className="text-orange-400 underline hover:no-underline">Log in →</Link>
-                </span>
-              )}
-            </div>
 
             {/* Terminal */}
             <Terminal

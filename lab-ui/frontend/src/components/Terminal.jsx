@@ -1,4 +1,4 @@
-import { useEffect, useRef, useState } from 'react'
+import { useState } from 'react'
 import { Copy, Check, Terminal as TerminalIcon } from 'lucide-react'
 
 // Returns a semantic modifier class; the actual color is driven by CSS vars
@@ -26,16 +26,10 @@ function classifyLine(line) {
 }
 
 export default function Terminal({ lines = [], isRunning = false, title = 'Terminal' }) {
-  const bottomRef = useRef(null)
   const [copied, setCopied] = useState(false)
 
-  useEffect(() => {
-    // Only follow output once there's something to follow — otherwise the empty
-    // terminal (bottom of a long page) scrolls itself into view on mount and
-    // drags the whole page down when Run Attack is the default tab.
-    if (lines.length === 0) return
-    bottomRef.current?.scrollIntoView({ behavior: 'smooth' })
-  }, [lines])
+  // Autoscroll intentionally disabled: appending a line must NOT scroll the page
+  // (or the log box) to the bottom. The user scrolls the box manually.
 
   const handleCopy = () => {
     navigator.clipboard.writeText(lines.join('\n')).then(() => {
@@ -114,7 +108,6 @@ export default function Terminal({ lines = [], isRunning = false, title = 'Termi
             />
           </div>
         )}
-        <div ref={bottomRef} />
       </div>
     </div>
   )
