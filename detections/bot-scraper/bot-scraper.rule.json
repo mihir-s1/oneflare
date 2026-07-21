@@ -12,13 +12,14 @@
     "s1ql": "",
     "scheduledParams": {
       "query": "class_uid=4002 dataSource.name='Cloudflare'\n| let src_ip = src_endpoint.ip\n| let bscore = number(unmapped.BotScore)\n| filter http_request.url.hostname contains:anycase(\"soledrop.co\") AND bscore <= 29\n| group\n    bot_requests   = count(),\n    min_botscore   = min(bscore),\n    avg_botscore   = avg(bscore),\n    distinct_paths = estimate_distinct(http_request.url.path),\n    sample_ua      = any(http_request.user_agent),\n    host           = any(http_request.url.hostname),\n    country        = any(src_endpoint.location.country),\n    first_seen     = oldest(timestamp),\n    last_seen      = newest(timestamp)\n  by src_ip\n| filter bot_requests >= 20\n| let detection_time = simpledateformat(last_seen, 'yyyy-MM-dd HH:mm:ss z', 'America/Chicago')\n| sort -bot_requests\n| columns detection_time, src_ip, host, bot_requests, min_botscore, avg_botscore, distinct_paths, sample_ua, country, first_seen\n| limit 100",
-      "runIntervalMinutes": 1,
-      "lookbackWindowMinutes": 15,
+      "runIntervalMinutes": 10,
+      "lookbackWindowMinutes": 10,
       "threshold": {
         "value": 0,
         "operator": "Greater"
       },
-      "alertPerRow": true
+      "alertPerRow": true,
+      "disableStreaksLogic": false
     },
     "entityMappings": [
       {

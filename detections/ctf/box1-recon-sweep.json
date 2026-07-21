@@ -1,61 +1,95 @@
 {
-  "box": "Box 1 — CF WAF (Recon)",
+  "box": "Box 1 \u2014 CF WAF (Recon)",
   "scenario": "Agentic AI agent maps the SoleDrop attack surface: scanner-tool User-Agents probing sensitive files (/.env, /.git/HEAD) and forced-browse API recon (/api/v1/admin, /api/v1/training-data).",
   "attack_source": "attack-scripts/campaigns/ctf.py :: fire_phase_1_* (RECON_PATHS, SCANNER_AGENTS_BOX1, SQLI_PAYLOADS)",
   "field_contract": "detections/shared/field-contract.md",
   "rules": [
     {
       "name": "SoleDrop-CTF-Box1-ScannerRecon",
-      "rule_type": "single-event (events)",
+      "rule_type": "scheduled (PowerQuery, grouped by src_ip \u2014 fires once per source)",
       "severity": "Medium",
-      "mitre": ["T1595.002 Active Scanning: Vulnerability Scanning", "T1083 File and Directory Discovery", "T1190 Exploit Public-Facing Application"],
-      "atlas": ["AML.T0035 Evade ML Model (recon stage)"],
-      "data_source": "Cloudflare — HTTP Requests + Firewall Events (OCSF HTTP Activity, class_uid=4002)",
-      "primary_signal": "A single request whose User-Agent is a known scanner/offensive tool OR whose path is a known sensitive-file / forced-browse endpoint.",
+      "mitre": [
+        "T1595.002 Active Scanning: Vulnerability Scanning",
+        "T1083 File and Directory Discovery",
+        "T1190 Exploit Public-Facing Application"
+      ],
+      "atlas": [
+        "AML.T0035 Evade ML Model (recon stage)"
+      ],
+      "data_source": "Cloudflare \u2014 HTTP Requests + Firewall Events (OCSF HTTP Activity, class_uid=4002)",
+      "primary_signal": "One src_endpoint.ip whose User-Agent is a known scanner/offensive tool OR that probes a known sensitive-file / forced-browse endpoint. Grouped by source so a sweep raises ONE alert per IP, not one per request.",
       "ocsf_fields": {
-        "dataSource.name": "mapped — 'Cloudflare'",
-        "class_uid": "mapped — 4002",
+        "dataSource.name": "mapped \u2014 'Cloudflare'",
+        "class_uid": "mapped \u2014 4002",
         "http_request.user_agent": "mapped (ClientRequestUserAgent)",
         "http_request.url.path": "mapped (ClientRequestPath)",
-        "src_endpoint.ip": "mapped (ClientIP) — entity"
+        "src_endpoint.ip": "mapped (ClientIP) \u2014 entity"
       },
       "hunt_query": {
-        "powerquery": "dataSource.name='Cloudflare' class_uid=4002 http_request.url.hostname contains '.lab.soledrop.co' (http_request.user_agent matches '(?i)(nikto|sqlmap|nuclei|masscan|wpscan|dirsearch|dirbuster|gobuster|feroxbuster|libwww-perl|autogpt|python-requests)' OR http_request.url.path in ('/.env','/.env.production','/.env.local','/.git/HEAD','/.git/config','/.aws/credentials','/config.json','/secrets.json','/.DS_Store','/api/v1/admin','/actuator/env','/phpmyadmin','/wp-login.php')) | group hits=count(), paths=estimate_distinct(http_request.url.path), last_seen=newest(timestamp) by src_endpoint.ip, http_request.user_agent | sort -hits | limit 100",
-        "note": "Run via powerquery_run over 24h first. Expect rows only when the CTF Box 1 phase has fired. Row count = distinct (src_ip, UA) recon pairs.",
-        "row_counts": "TO-RUN on live tenant — author-only, no execution performed."
+        "powerquery": "dataSource.name='Cloudflare' class_uid=4002 http_request.url.hostname contains '.lab.soledrop.co' (http_request.user_agent matches '(?i)(nikto|sqlmap|nuclei|masscan|wpscan|dirsearch|dirbuster|gobuster|feroxbuster|libwww-perl|autogpt)' OR http_request.url.path in ('/.env','/.env.production','/.env.local','/.git/HEAD','/.git/config','/.aws/credentials','/config.json','/secrets.json','/.DS_Store','/api/v1/admin','/actuator/env','/phpmyadmin','/wp-login.php')) | group hits=count(), paths=estimate_distinct(http_request.url.path), last_seen=newest(timestamp) by src_endpoint.ip, http_request.user_agent | sort -hits | limit 100",
+        "note": "Grouped scheduled rule: one row per source IP. 'python-requests' removed from the UA set \u2014 it matched every Python-based lab attack (credential stuffing etc.) and caused mass false alerts.",
+        "row_counts": "TO-RUN on live tenant \u2014 author-only, no execution performed."
       },
       "api_body": {
         "data": {
           "name": "SoleDrop-CTF-Box1-ScannerRecon",
-          "description": "Single recon request to SoleDrop: known scanner User-Agent or probe of a sensitive file / forced-browse endpoint. MITRE T1595.002 / T1083 / T1190; ATLAS AML.T0035. Source: Cloudflare HTTP/Firewall (class_uid=4002).",
-          "queryType": "events",
+          "description": "Scheduled recon-sweep detection grouped by source IP \u2014 fires ONCE per source when a known scanner User-Agent (nikto/sqlmap/nuclei/masscan/wpscan/dir*/feroxbuster/libwww-perl/autogpt) or a sensitive-file / forced-browse probe is seen. 'python-requests' removed (it matched all Python lab attacks, e.g. cred stuffing, causing 80+ false alerts). Run/lookback aligned (10/10). MITRE T1595.002 / T1083 / T1190; ATLAS AML.T0035.",
+          "queryType": "scheduled",
           "queryLang": "2.0",
           "severity": "Medium",
-          "status": "Disabled",
+          "status": "Active",
           "expirationMode": "Permanent",
           "treatAsThreat": "UNDEFINED",
           "networkQuarantine": false,
-          "s1ql": "dataSource.name = 'Cloudflare' AND class_uid = 4002 AND (http_request.user_agent matches '(?i)(nikto|sqlmap|nuclei|masscan|wpscan|dirsearch|dirbuster|gobuster|feroxbuster|libwww-perl|autogpt|python-requests)' OR http_request.url.path in ('/.env','/.env.production','/.env.local','/.git/HEAD','/.git/config','/.aws/credentials','/config.json','/secrets.json','/.DS_Store','/api/v1/admin','/actuator/env','/phpmyadmin','/wp-login.php'))"
+          "s1ql": "",
+          "entityMappings": [
+            {
+              "columnName": "src_ip"
+            },
+            {
+              "columnName": "host"
+            }
+          ],
+          "scheduledParams": {
+            "query": "class_uid=4002 dataSource.name='Cloudflare'\n| let src_ip = src_endpoint.ip\n| let ua = http_request.user_agent\n| let req_path = http_request.url.path\n| filter (ua matches \"(?i)(nikto|sqlmap|nuclei|masscan|wpscan|dirsearch|dirbuster|gobuster|feroxbuster|libwww-perl|autogpt)\") OR (req_path in ('/.env','/.env.production','/.env.local','/.git/HEAD','/.git/config','/.aws/credentials','/config.json','/secrets.json','/.DS_Store','/api/v1/admin','/actuator/env','/phpmyadmin','/wp-login.php'))\n| group recon_hits=count(), distinct_paths=estimate_distinct(req_path), sample_ua=any(ua), sample_path=any(req_path), host=any(http_request.url.hostname), country=any(src_endpoint.location.country), first_seen=oldest(timestamp), last_seen=newest(timestamp) by src_ip\n| filter recon_hits >= 1\n| let detection_time = simpledateformat(last_seen, 'yyyy-MM-dd HH:mm:ss z', 'America/Chicago')\n| sort -recon_hits\n| columns detection_time, src_ip, host, recon_hits, distinct_paths, sample_ua, sample_path, country, first_seen\n| limit 100",
+            "runIntervalMinutes": 10,
+            "lookbackWindowMinutes": 10,
+            "threshold": {
+              "value": 0,
+              "operator": "Greater"
+            },
+            "alertPerRow": true,
+            "disableStreaksLogic": false
+          }
         },
-        "filter": {"accountIds": ["<accountId>"]}
+        "filter": {
+          "accountIds": [
+            "<accountId>"
+          ]
+        }
       },
       "asset_binding": "Auto-binds from the matched event ONLY if Cloudflare events carry device.uid (console agent id or unified asset id) + an endpoint class_uid via the asset-enrichment solution. Until enrichment runs, Target Asset = 'Unknown Device'; entity is src_endpoint.ip. Rule logic fires regardless.",
       "deploy": "POST /web/api/v2.1/cloud-detection/rules with api_body -> PUT /cloud-detection/rules/enable {\"filter\":{\"ids\":[\"<id>\"]}} -> poll GET ?ids=<id>&isLegacy=false until status==Active. Backslashes already JSON-double-escaped in s1ql regex.",
-      "tuning": "Medium severity by design — recon is high-volume and low-confidence on its own. Real value is as the FIRST sub-query of the Box 4 correlation (chain pivot). Consider an inline allowlist of legitimate scanners: AND NOT (src_endpoint.ip in ('<known-scanner-ip>'))."
+      "tuning": "Grouped scheduled rule fires once per source per 10-min window. 'python-requests' intentionally excluded to avoid matching the lab's own Python attack tooling. Add an allowlist of known-good scanner IPs if needed: | filter NOT (src_ip in ('<known-scanner-ip>'))."
     },
     {
       "name": "SoleDrop-CTF-Box1-ReconSweep-Fanout",
       "rule_type": "scheduled (PowerQuery)",
       "severity": "High",
-      "mitre": ["T1595.002 Active Scanning: Vulnerability Scanning", "T1046 Network Service Discovery"],
-      "atlas": ["AML.T0035 Evade ML Model"],
-      "data_source": "Cloudflare — HTTP Requests + Firewall Events (class_uid=4002)",
-      "primary_signal": "One src_endpoint.ip touching many DISTINCT recon/sensitive paths in the window (path fan-out) — a sweep, not a single probe.",
+      "mitre": [
+        "T1595.002 Active Scanning: Vulnerability Scanning",
+        "T1046 Network Service Discovery"
+      ],
+      "atlas": [
+        "AML.T0035 Evade ML Model"
+      ],
+      "data_source": "Cloudflare \u2014 HTTP Requests + Firewall Events (class_uid=4002)",
+      "primary_signal": "One src_endpoint.ip touching many DISTINCT recon/sensitive paths in the window (path fan-out) \u2014 a sweep, not a single probe.",
       "ocsf_fields": {
-        "src_endpoint.ip": "mapped — entity (entityMappings)",
-        "http_request.url.path": "mapped — distinct-counted",
-        "http_request.user_agent": "mapped — carried as evidence",
-        "tls.ja3_hash.value": "mapped (JA3Hash) — carried to enable Box-2/Box-4 chain pivot (JA4 is NOT PQ-addressable; use JA3)"
+        "src_endpoint.ip": "mapped \u2014 entity (entityMappings)",
+        "http_request.url.path": "mapped \u2014 distinct-counted",
+        "http_request.user_agent": "mapped \u2014 carried as evidence",
+        "tls.ja3_hash.value": "mapped (JA3Hash) \u2014 carried to enable Box-2/Box-4 chain pivot (JA4 is NOT PQ-addressable; use JA3)"
       },
       "hunt_query": {
         "powerquery": "dataSource.name='Cloudflare' class_uid=4002 http_request.url.hostname contains '.lab.soledrop.co' http_request.url.path=* | filter http_request.url.path in ('/.env','/.env.production','/.env.local','/.git/HEAD','/.git/config','/.aws/credentials','/config.json','/secrets.json','/.DS_Store','/api/v1/admin','/api/v1/users','/api/v1/training-data','/api/v1/models','/actuator','/actuator/env','/actuator/health','/console','/phpmyadmin','/wp-admin','/wp-login.php','/admin','/admin/login','/admin/config','/dashboard','/openapi.json','/swagger.json','/swagger-ui.html','/v1/api-docs') | group distinct_paths=estimate_distinct(http_request.url.path), hits=count(), first_seen=oldest(timestamp), last_seen=newest(timestamp), ua=any(http_request.user_agent), ja3=any(tls.ja3_hash.value) by src_ip=src_endpoint.ip | filter distinct_paths >= 8 | columns src_ip, distinct_paths, hits, ua, ja3, first_seen, last_seen | sort -distinct_paths | limit 100",
@@ -73,15 +107,26 @@
           "expirationMode": "Permanent",
           "treatAsThreat": "UNDEFINED",
           "networkQuarantine": false,
-          "entityMappings": [{"columnName": "src_ip"}],
+          "entityMappings": [
+            {
+              "columnName": "src_ip"
+            }
+          ],
           "scheduledParams": {
             "query": "dataSource.name='Cloudflare' class_uid=4002 http_request.url.hostname contains '.lab.soledrop.co' http_request.url.path=* | filter http_request.url.path in ('/.env','/.env.production','/.env.local','/.git/HEAD','/.git/config','/.aws/credentials','/config.json','/secrets.json','/.DS_Store','/api/v1/admin','/api/v1/users','/api/v1/training-data','/api/v1/models','/actuator','/actuator/env','/actuator/health','/console','/phpmyadmin','/wp-admin','/wp-login.php','/admin','/admin/login','/admin/config','/dashboard','/openapi.json','/swagger.json','/swagger-ui.html','/v1/api-docs') | group distinct_paths=estimate_distinct(http_request.url.path), hits=count(), first_seen=oldest(timestamp), last_seen=newest(timestamp), ua=any(http_request.user_agent), ja3=any(tls.ja3_hash.value) by src_ip=src_endpoint.ip | filter distinct_paths >= 8 | columns src_ip, distinct_paths, hits, ua, ja3, first_seen, last_seen | sort -distinct_paths | limit 100",
             "runIntervalMinutes": 15,
             "lookbackWindowMinutes": 15,
-            "threshold": {"value": 0, "operator": "Greater"}
+            "threshold": {
+              "value": 0,
+              "operator": "Greater"
+            }
           }
         },
-        "filter": {"accountIds": ["<accountId>"]}
+        "filter": {
+          "accountIds": [
+            "<accountId>"
+          ]
+        }
       },
       "asset_binding": "Scheduled rule: entityMappings on src_ip (= src_endpoint.ip). Until asset enrichment projects device_host/device_agentuuid, the entity is the source IP (sufficient for the HA block-IP playbook); device shows 'Unknown Device'.",
       "deploy": "POST -> enable -> poll. Scheduled rule: treatAsThreat=UNDEFINED, networkQuarantine=false required. Wait one full 15-min interval after Active before judging. List with isLegacy=false."
