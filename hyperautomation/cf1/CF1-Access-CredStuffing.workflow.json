@@ -110,7 +110,7 @@
         "client_data": {
           "position": {
             "x": 0.0,
-            "y": 177.0
+            "y": 190.0
           },
           "dimensions": {
             "width": 256.0,
@@ -176,7 +176,7 @@
         "client_data": {
           "position": {
             "x": 0.0,
-            "y": 354.0
+            "y": 380.0
           },
           "dimensions": {
             "width": 256.0,
@@ -240,7 +240,7 @@
         "client_data": {
           "position": {
             "x": 0.0,
-            "y": 531.0
+            "y": 570.0
           },
           "dimensions": {
             "width": 256.0,
@@ -305,7 +305,7 @@
         "client_data": {
           "position": {
             "x": 0.0,
-            "y": 885.0
+            "y": 950.0
           },
           "dimensions": {
             "width": 256.0,
@@ -383,7 +383,7 @@
         "client_data": {
           "position": {
             "x": 0.0,
-            "y": 1062.0
+            "y": 1140.0
           },
           "dimensions": {
             "width": 256.0,
@@ -448,7 +448,7 @@
         "client_data": {
           "position": {
             "x": 0.0,
-            "y": 1239.0
+            "y": 1330.0
           },
           "dimensions": {
             "width": 256.0,
@@ -490,7 +490,7 @@
         "client_data": {
           "position": {
             "x": 0.0,
-            "y": 1416.0
+            "y": 1520.0
           },
           "dimensions": {
             "width": 256.0,
@@ -546,7 +546,7 @@
         "client_data": {
           "position": {
             "x": 0.0,
-            "y": 1593.0
+            "y": 1710.0
           },
           "dimensions": {
             "width": 256.0,
@@ -616,8 +616,8 @@
         "description": "STEP 4a (APPROVED) \u2014 native Cloudflare 'Create an IP Access rule' (public_action_id 9db31c31, POST /client/v4/user/firewall/access_rules/rules). Account/user-scoped block of the attacking src_ip (no zone_id needed). Reverse later with 'Delete an IP Access rule'. Bind the Cloudflare connection after import.",
         "client_data": {
           "position": {
-            "x": -260.0,
-            "y": 1770.0
+            "x": 230.0,
+            "y": 2090.0
           },
           "dimensions": {
             "width": 256.0,
@@ -681,8 +681,8 @@
         "description": "STEP 4b (APPROVED) \u2014 update the original Slack message in place (chat.update) to confirm the block, naming the approver and deep-linking the alert. Reuses the reference Slack connection IDs; public_action_id is 'Post Message' with the URL overridden to chat.update.",
         "client_data": {
           "position": {
-            "x": -260.0,
-            "y": 1947.0
+            "x": -230.0,
+            "y": 2470.0
           },
           "dimensions": {
             "width": 256.0,
@@ -746,8 +746,8 @@
         "description": "STEP 4a (DISMISSED) \u2014 update the original Slack message (chat.update) to record that the analyst treated the alert as a false positive; no block applied. Reuses the reference Slack connection IDs.",
         "client_data": {
           "position": {
-            "x": 260.0,
-            "y": 1770.0
+            "x": -230.0,
+            "y": 1900.0
           },
           "dimensions": {
             "width": 256.0,
@@ -811,8 +811,8 @@
         "description": "STEP 4c (APPROVED) \u2014 native SentinelOne (Unified Alerts) 'Add Note to Alert' (public_action_id 34de543f). Records who approved plus the full evidence line on the alert. Reuses the reference's S1-alert connection + integration IDs. Verify the native note body schema (data.text + filter.ids) against the bound connection.",
         "client_data": {
           "position": {
-            "x": -260.0,
-            "y": 2124.0
+            "x": 0.0,
+            "y": 2660.0
           },
           "dimensions": {
             "width": 256.0,
@@ -876,8 +876,8 @@
         "description": "STEP 4b (DISMISSED) \u2014 native SentinelOne (Unified Alerts) 'Add Note to Alert' (public_action_id 34de543f). Records the dismissal, that no block was applied, and the rationale. Reuses the reference's S1-alert connection IDs.",
         "client_data": {
           "position": {
-            "x": 260.0,
-            "y": 1947.0
+            "x": -230.0,
+            "y": 2090.0
           },
           "dimensions": {
             "width": 256.0,
@@ -932,8 +932,8 @@
         "description": "STEP 4d (APPROVED) \u2014 evidence-discipline gate on the verdict. TRUE (VirusTotal malicious > 0) -> set analyst verdict True Positive Malware. FALSE (no independent malicious verdict) -> only move status to In Progress. Per the S1 persona rules, a True-Positive verdict requires independent threat-intel confirmation, never the block action alone.",
         "client_data": {
           "position": {
-            "x": -260.0,
-            "y": 2301.0
+            "x": 0.0,
+            "y": 2850.0
           },
           "dimensions": {
             "width": 256.0,
@@ -1002,8 +1002,8 @@
         "description": "STEP 4c (DISMISSED) \u2014 native SentinelOne (Unified Alerts) 'Set Analyst Verdict as False Positive Undefined' (public_action_id fb264d94). Closes the loop by recording the analyst's FP verdict on the alert. Terminal node of the dismissed branch.",
         "client_data": {
           "position": {
-            "x": 260.0,
-            "y": 2124.0
+            "x": -230.0,
+            "y": 2280.0
           },
           "dimensions": {
             "width": 256.0,
@@ -1061,8 +1061,8 @@
         "description": "STEP 4e (APPROVED, VT malicious) \u2014 native SentinelOne (Unified Alerts) 'Set Analyst Verdict as True Positive Malware' (public_action_id 8ec867d8). Only reached when VirusTotal independently confirmed the IP as malicious. Terminal node of this branch.",
         "client_data": {
           "position": {
-            "x": -420.0,
-            "y": 2478.0
+            "x": 230.0,
+            "y": 3040.0
           },
           "dimensions": {
             "width": 256.0,
@@ -1120,8 +1120,8 @@
         "description": "STEP 4e (APPROVED, no TI confirmation) \u2014 native SentinelOne (Unified Alerts) 'Set Alert Status to In Progress' (public_action_id b9658ad8). Block was applied on analyst approval but VirusTotal did not confirm malicious, so the alert is left In Progress (max classification SUSPICIOUS \u2014 Pending Confirmation), not marked True Positive. Terminal node of this branch.",
         "client_data": {
           "position": {
-            "x": -100.0,
-            "y": 2478.0
+            "x": -230.0,
+            "y": 3040.0
           },
           "dimensions": {
             "width": 256.0,
@@ -1180,7 +1180,7 @@
         "client_data": {
           "position": {
             "x": 0.0,
-            "y": 0.0
+            "y": 760.0
           },
           "dimensions": {
             "width": 256.0,
@@ -1244,8 +1244,8 @@
         "description": "Validate: existing IP access rules (already-blocked check).",
         "client_data": {
           "position": {
-            "x": 0.0,
-            "y": 0.0
+            "x": 230.0,
+            "y": 1900.0
           },
           "dimensions": {
             "width": 256.0,
@@ -1309,8 +1309,8 @@
         "description": "STEP 4b (APPROVED) \u2014 update the original Slack message in place (chat.update) to confirm the block, naming the approver and deep-linking the alert. Reuses the reference Slack connection IDs; public_action_id is 'Post Message' with the URL overridden to chat.update.",
         "client_data": {
           "position": {
-            "x": -260.0,
-            "y": 1947.0
+            "x": 230.0,
+            "y": 2470.0
           },
           "dimensions": {
             "width": 256.0,
@@ -1365,8 +1365,8 @@
         "description": "Response Had Failure",
         "client_data": {
           "position": {
-            "x": 0.0,
-            "y": 0.0
+            "x": 230.0,
+            "y": 2280.0
           },
           "dimensions": {
             "width": 256.0,

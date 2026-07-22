@@ -92,7 +92,7 @@
         "client_data": {
           "position": {
             "x": 0.0,
-            "y": 0.0
+            "y": 190.0
           },
           "dimensions": {
             "width": 256.0,
@@ -157,7 +157,7 @@
         "client_data": {
           "position": {
             "x": 0.0,
-            "y": 0.0
+            "y": 380.0
           },
           "dimensions": {
             "width": 256.0,
@@ -199,7 +199,7 @@
         "client_data": {
           "position": {
             "x": 0.0,
-            "y": 0.0
+            "y": 570.0
           },
           "dimensions": {
             "width": 256.0,
@@ -259,8 +259,8 @@
         "description": "Is OneFlare IP Rule",
         "client_data": {
           "position": {
-            "x": 0.0,
-            "y": 0.0
+            "x": -230.0,
+            "y": 760.0
           },
           "dimensions": {
             "width": 256.0,
@@ -324,8 +324,8 @@
         "description": "Delete IP Rule",
         "client_data": {
           "position": {
-            "x": 0.0,
-            "y": 0.0
+            "x": -230.0,
+            "y": 950.0
           },
           "dimensions": {
             "width": 256.0,
@@ -383,8 +383,8 @@
         "description": "List Ruleset Rules",
         "client_data": {
           "position": {
-            "x": 0.0,
-            "y": 0.0
+            "x": 230.0,
+            "y": 760.0
           },
           "dimensions": {
             "width": 256.0,
@@ -425,8 +425,8 @@
         "description": "Loop Ruleset Rules",
         "client_data": {
           "position": {
-            "x": 0.0,
-            "y": 0.0
+            "x": 230.0,
+            "y": 950.0
           },
           "dimensions": {
             "width": 256.0,
@@ -486,8 +486,8 @@
         "description": "Is OneFlare Ruleset Rule",
         "client_data": {
           "position": {
-            "x": 0.0,
-            "y": 0.0
+            "x": -230.0,
+            "y": 1140.0
           },
           "dimensions": {
             "width": 256.0,
@@ -551,8 +551,8 @@
         "description": "Delete Ruleset Rule",
         "client_data": {
           "position": {
-            "x": 0.0,
-            "y": 0.0
+            "x": -230.0,
+            "y": 1330.0
           },
           "dimensions": {
             "width": 256.0,
@@ -610,8 +610,8 @@
         "description": "List Gateway Rules",
         "client_data": {
           "position": {
-            "x": 0.0,
-            "y": 0.0
+            "x": 230.0,
+            "y": 1140.0
           },
           "dimensions": {
             "width": 256.0,
@@ -652,8 +652,8 @@
         "description": "Loop Gateway Rules",
         "client_data": {
           "position": {
-            "x": 0.0,
-            "y": 0.0
+            "x": 230.0,
+            "y": 1330.0
           },
           "dimensions": {
             "width": 256.0,
@@ -713,8 +713,8 @@
         "description": "Is OneFlare Gateway Rule",
         "client_data": {
           "position": {
-            "x": 0.0,
-            "y": 0.0
+            "x": -230.0,
+            "y": 1520.0
           },
           "dimensions": {
             "width": 256.0,
@@ -778,8 +778,8 @@
         "description": "Delete Gateway Rule",
         "client_data": {
           "position": {
-            "x": 0.0,
-            "y": 0.0
+            "x": -230.0,
+            "y": 1710.0
           },
           "dimensions": {
             "width": 256.0,
@@ -837,8 +837,8 @@
         "description": "List DNS Records",
         "client_data": {
           "position": {
-            "x": 0.0,
-            "y": 0.0
+            "x": 230.0,
+            "y": 1520.0
           },
           "dimensions": {
             "width": 256.0,
@@ -879,8 +879,8 @@
         "description": "Loop DNS Records",
         "client_data": {
           "position": {
-            "x": 0.0,
-            "y": 0.0
+            "x": 230.0,
+            "y": 1710.0
           },
           "dimensions": {
             "width": 256.0,
@@ -949,8 +949,8 @@
         "description": "Delete DNS Record",
         "client_data": {
           "position": {
-            "x": 0.0,
-            "y": 0.0
+            "x": -230.0,
+            "y": 1900.0
           },
           "dimensions": {
             "width": 256.0,
@@ -1008,8 +1008,8 @@
         "description": "Revert Zone Security Level",
         "client_data": {
           "position": {
-            "x": 0.0,
-            "y": 0.0
+            "x": 230.0,
+            "y": 1900.0
           },
           "dimensions": {
             "width": 256.0,
