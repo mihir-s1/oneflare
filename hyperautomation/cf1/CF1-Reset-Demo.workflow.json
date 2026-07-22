@@ -1,0 +1,1029 @@
+{
+  "name": "CF1-Reset-Demo",
+  "description": "Manual reversal playbook. Removes every OneFlare demo artifact created by the CF1-* playbooks so the Cloudflare portal is clean for the next demo: deletes zone IP access rules, custom-firewall (Ruleset) rules, and Gateway DNS rules whose notes/description/name contain \"OneFlare\"; deletes the sinkhole DNS record; and reverts zone security level to medium. Idempotent (missing artifacts are no-ops). Bind the Cloudflare connection, then run manually.",
+  "actions": [
+    {
+      "action": {
+        "type": "manual_trigger",
+        "tag": "core_action",
+        "connection_id": null,
+        "connection_name": "",
+        "use_connection_name": false,
+        "integration_id": null,
+        "data": {
+          "name": "Manual Trigger",
+          "action_type": "manual_trigger",
+          "trigger_type": "static",
+          "dynamic_properties": {},
+          "static_payload": "{}"
+        },
+        "state": "active",
+        "description": "Run manually after a demo to remove every OneFlare artifact.",
+        "client_data": {
+          "position": {
+            "x": 0.0,
+            "y": 0.0
+          },
+          "dimensions": {
+            "width": 256.0,
+            "height": 100.0
+          },
+          "collapsed": false
+        },
+        "snippet_workflow_id": null,
+        "snippet_version_id": null
+      },
+      "export_id": 0,
+      "connected_to": [
+        {
+          "target": 1,
+          "custom_handle": null,
+          "payload": null
+        }
+      ],
+      "parent_action": null
+    },
+    {
+      "action": {
+        "type": "variable",
+        "tag": "core_action",
+        "connection_id": null,
+        "connection_name": null,
+        "use_connection_name": false,
+        "integration_id": null,
+        "data": {
+          "name": "Set Context",
+          "action_type": "variable",
+          "variables": [
+            {
+              "name": "zone",
+              "value": "cf4d15af4a7eb86b033f859aefec1047",
+              "should_use_as_output": false,
+              "is_secret": false
+            },
+            {
+              "name": "account",
+              "value": "b8e637d5097fff0c694c3290ba81563e",
+              "should_use_as_output": false,
+              "is_secret": false
+            },
+            {
+              "name": "ruleset",
+              "value": "47e1f8f7826b485498964c658c551f22",
+              "should_use_as_output": false,
+              "is_secret": false
+            },
+            {
+              "name": "sink_name",
+              "value": "c2sink-demo.soledrop.co",
+              "should_use_as_output": false,
+              "is_secret": false
+            }
+          ],
+          "variables_scope": "local",
+          "expire_in_unit": null,
+          "expire_in_value": null,
+          "expire_method": null,
+          "global_var_workflow_access_type": null,
+          "global_var_workflow_access_workflow_ids": null
+        },
+        "state": "active",
+        "description": "Reset constants.",
+        "client_data": {
+          "position": {
+            "x": 0.0,
+            "y": 0.0
+          },
+          "dimensions": {
+            "width": 256.0,
+            "height": 100.0
+          },
+          "collapsed": false
+        },
+        "snippet_workflow_id": null,
+        "snippet_version_id": null
+      },
+      "export_id": 1,
+      "connected_to": [
+        {
+          "target": 2,
+          "custom_handle": null,
+          "payload": null
+        }
+      ],
+      "parent_action": null
+    },
+    {
+      "action": {
+        "type": "http_request",
+        "tag": "integration",
+        "connection_id": "f1d111b8-d0c0-4ea7-8ae7-2891c16e9592",
+        "connection_name": "",
+        "use_connection_name": false,
+        "integration_id": "0dedd07c-0b9a-4205-9215-03ab1a95eb3a",
+        "data": {
+          "name": "List Zone IP Rules",
+          "action_type": "http_request",
+          "public_action_id": null,
+          "method": "get",
+          "url": "{{Connection.protocol}}{{Connection.url}}/client/v4/zones/cf4d15af4a7eb86b033f859aefec1047/firewall/access_rules/rules?per_page=100",
+          "url_path": "/client/v4/zones/cf4d15af4a7eb86b033f859aefec1047/firewall/access_rules/rules?per_page=100",
+          "url_prefix": null,
+          "payload": "",
+          "parameters": [],
+          "retry_on_status_code": null,
+          "retry_on_status_codes": [
+            500
+          ],
+          "retry_config": null,
+          "ssl_verification": true,
+          "timeout": 30,
+          "headers": {
+            "Content-Type": "application/json"
+          },
+          "use_authentication_data": true,
+          "use_proxy": false,
+          "proxy_user": null,
+          "proxy_password": null,
+          "proxy_host": null,
+          "proxy_port": null,
+          "redirect_follow": true,
+          "continue_on_fail": true,
+          "continue_on_fail_status_codes": [],
+          "body_type": null
+        },
+        "state": "active",
+        "description": "List Zone IP Rules",
+        "client_data": {
+          "position": {
+            "x": 0.0,
+            "y": 0.0
+          },
+          "dimensions": {
+            "width": 256.0,
+            "height": 100.0
+          },
+          "collapsed": false
+        },
+        "snippet_workflow_id": null,
+        "snippet_version_id": null
+      },
+      "export_id": 2,
+      "connected_to": [
+        {
+          "target": 3,
+          "custom_handle": null,
+          "payload": null
+        }
+      ],
+      "parent_action": null
+    },
+    {
+      "action": {
+        "type": "loop",
+        "tag": "core_action",
+        "connection_id": null,
+        "connection_name": null,
+        "use_connection_name": false,
+        "integration_id": null,
+        "data": {
+          "name": "Loop IP Rules",
+          "action_type": "loop",
+          "loop_type": "dynamic",
+          "number_of_iterations": 1,
+          "object_to_iterate": "{{list-zone-ip-rules.body.result}}",
+          "is_parallel": false
+        },
+        "state": "active",
+        "description": "Loop IP Rules",
+        "client_data": {
+          "position": {
+            "x": 0.0,
+            "y": 0.0
+          },
+          "dimensions": {
+            "width": 256.0,
+            "height": 100.0
+          },
+          "collapsed": false
+        },
+        "snippet_workflow_id": null,
+        "snippet_version_id": null
+      },
+      "export_id": 3,
+      "connected_to": [
+        {
+          "target": 4,
+          "custom_handle": "inner",
+          "payload": null
+        },
+        {
+          "target": 6,
+          "custom_handle": null,
+          "payload": null
+        }
+      ],
+      "parent_action": null
+    },
+    {
+      "action": {
+        "type": "condition",
+        "tag": "core_action",
+        "connection_id": null,
+        "connection_name": null,
+        "use_connection_name": false,
+        "integration_id": null,
+        "data": {
+          "name": "Is OneFlare IP Rule",
+          "action_type": "condition",
+          "condition_type": "simple",
+          "condition": {
+            "operator": "and",
+            "conditions": [
+              {
+                "operator": "and",
+                "conditions": [
+                  {
+                    "input_value": "{{loop-ip-rules.item.notes}}",
+                    "compared_value": "OneFlare",
+                    "comparison_operator": "contains"
+                  }
+                ]
+              }
+            ]
+          },
+          "conditions": null,
+          "conditions_relationship": "and"
+        },
+        "state": "active",
+        "description": "Is OneFlare IP Rule",
+        "client_data": {
+          "position": {
+            "x": 0.0,
+            "y": 0.0
+          },
+          "dimensions": {
+            "width": 256.0,
+            "height": 100.0
+          },
+          "collapsed": false
+        },
+        "snippet_workflow_id": null,
+        "snippet_version_id": null
+      },
+      "export_id": 4,
+      "connected_to": [
+        {
+          "target": 5,
+          "custom_handle": "true",
+          "payload": null
+        }
+      ],
+      "parent_action": 3
+    },
+    {
+      "action": {
+        "type": "http_request",
+        "tag": "integration",
+        "connection_id": "f1d111b8-d0c0-4ea7-8ae7-2891c16e9592",
+        "connection_name": "",
+        "use_connection_name": false,
+        "integration_id": "0dedd07c-0b9a-4205-9215-03ab1a95eb3a",
+        "data": {
+          "name": "Delete IP Rule",
+          "action_type": "http_request",
+          "public_action_id": null,
+          "method": "delete",
+          "url": "{{Connection.protocol}}{{Connection.url}}/client/v4/zones/cf4d15af4a7eb86b033f859aefec1047/firewall/access_rules/rules/{{loop-ip-rules.item.id}}",
+          "url_path": "/client/v4/zones/cf4d15af4a7eb86b033f859aefec1047/firewall/access_rules/rules/{{loop-ip-rules.item.id}}",
+          "url_prefix": null,
+          "payload": "",
+          "parameters": [],
+          "retry_on_status_code": null,
+          "retry_on_status_codes": [
+            500
+          ],
+          "retry_config": null,
+          "ssl_verification": true,
+          "timeout": 30,
+          "headers": {
+            "Content-Type": "application/json"
+          },
+          "use_authentication_data": true,
+          "use_proxy": false,
+          "proxy_user": null,
+          "proxy_password": null,
+          "proxy_host": null,
+          "proxy_port": null,
+          "redirect_follow": true,
+          "continue_on_fail": true,
+          "continue_on_fail_status_codes": [],
+          "body_type": null
+        },
+        "state": "active",
+        "description": "Delete IP Rule",
+        "client_data": {
+          "position": {
+            "x": 0.0,
+            "y": 0.0
+          },
+          "dimensions": {
+            "width": 256.0,
+            "height": 100.0
+          },
+          "collapsed": false
+        },
+        "snippet_workflow_id": null,
+        "snippet_version_id": null
+      },
+      "export_id": 5,
+      "connected_to": [],
+      "parent_action": 3
+    },
+    {
+      "action": {
+        "type": "http_request",
+        "tag": "integration",
+        "connection_id": "f1d111b8-d0c0-4ea7-8ae7-2891c16e9592",
+        "connection_name": "",
+        "use_connection_name": false,
+        "integration_id": "0dedd07c-0b9a-4205-9215-03ab1a95eb3a",
+        "data": {
+          "name": "List Ruleset Rules",
+          "action_type": "http_request",
+          "public_action_id": null,
+          "method": "get",
+          "url": "{{Connection.protocol}}{{Connection.url}}/client/v4/zones/cf4d15af4a7eb86b033f859aefec1047/rulesets/47e1f8f7826b485498964c658c551f22",
+          "url_path": "/client/v4/zones/cf4d15af4a7eb86b033f859aefec1047/rulesets/47e1f8f7826b485498964c658c551f22",
+          "url_prefix": null,
+          "payload": "",
+          "parameters": [],
+          "retry_on_status_code": null,
+          "retry_on_status_codes": [
+            500
+          ],
+          "retry_config": null,
+          "ssl_verification": true,
+          "timeout": 30,
+          "headers": {
+            "Content-Type": "application/json"
+          },
+          "use_authentication_data": true,
+          "use_proxy": false,
+          "proxy_user": null,
+          "proxy_password": null,
+          "proxy_host": null,
+          "proxy_port": null,
+          "redirect_follow": true,
+          "continue_on_fail": true,
+          "continue_on_fail_status_codes": [],
+          "body_type": null
+        },
+        "state": "active",
+        "description": "List Ruleset Rules",
+        "client_data": {
+          "position": {
+            "x": 0.0,
+            "y": 0.0
+          },
+          "dimensions": {
+            "width": 256.0,
+            "height": 100.0
+          },
+          "collapsed": false
+        },
+        "snippet_workflow_id": null,
+        "snippet_version_id": null
+      },
+      "export_id": 6,
+      "connected_to": [
+        {
+          "target": 7,
+          "custom_handle": null,
+          "payload": null
+        }
+      ],
+      "parent_action": null
+    },
+    {
+      "action": {
+        "type": "loop",
+        "tag": "core_action",
+        "connection_id": null,
+        "connection_name": null,
+        "use_connection_name": false,
+        "integration_id": null,
+        "data": {
+          "name": "Loop Ruleset Rules",
+          "action_type": "loop",
+          "loop_type": "dynamic",
+          "number_of_iterations": 1,
+          "object_to_iterate": "{{list-ruleset-rules.body.result.rules}}",
+          "is_parallel": false
+        },
+        "state": "active",
+        "description": "Loop Ruleset Rules",
+        "client_data": {
+          "position": {
+            "x": 0.0,
+            "y": 0.0
+          },
+          "dimensions": {
+            "width": 256.0,
+            "height": 100.0
+          },
+          "collapsed": false
+        },
+        "snippet_workflow_id": null,
+        "snippet_version_id": null
+      },
+      "export_id": 7,
+      "connected_to": [
+        {
+          "target": 8,
+          "custom_handle": "inner",
+          "payload": null
+        },
+        {
+          "target": 10,
+          "custom_handle": null,
+          "payload": null
+        }
+      ],
+      "parent_action": null
+    },
+    {
+      "action": {
+        "type": "condition",
+        "tag": "core_action",
+        "connection_id": null,
+        "connection_name": null,
+        "use_connection_name": false,
+        "integration_id": null,
+        "data": {
+          "name": "Is OneFlare Ruleset Rule",
+          "action_type": "condition",
+          "condition_type": "simple",
+          "condition": {
+            "operator": "and",
+            "conditions": [
+              {
+                "operator": "and",
+                "conditions": [
+                  {
+                    "input_value": "{{loop-ruleset-rules.item.description}}",
+                    "compared_value": "OneFlare",
+                    "comparison_operator": "contains"
+                  }
+                ]
+              }
+            ]
+          },
+          "conditions": null,
+          "conditions_relationship": "and"
+        },
+        "state": "active",
+        "description": "Is OneFlare Ruleset Rule",
+        "client_data": {
+          "position": {
+            "x": 0.0,
+            "y": 0.0
+          },
+          "dimensions": {
+            "width": 256.0,
+            "height": 100.0
+          },
+          "collapsed": false
+        },
+        "snippet_workflow_id": null,
+        "snippet_version_id": null
+      },
+      "export_id": 8,
+      "connected_to": [
+        {
+          "target": 9,
+          "custom_handle": "true",
+          "payload": null
+        }
+      ],
+      "parent_action": 7
+    },
+    {
+      "action": {
+        "type": "http_request",
+        "tag": "integration",
+        "connection_id": "f1d111b8-d0c0-4ea7-8ae7-2891c16e9592",
+        "connection_name": "",
+        "use_connection_name": false,
+        "integration_id": "0dedd07c-0b9a-4205-9215-03ab1a95eb3a",
+        "data": {
+          "name": "Delete Ruleset Rule",
+          "action_type": "http_request",
+          "public_action_id": null,
+          "method": "delete",
+          "url": "{{Connection.protocol}}{{Connection.url}}/client/v4/zones/cf4d15af4a7eb86b033f859aefec1047/rulesets/47e1f8f7826b485498964c658c551f22/rules/{{loop-ruleset-rules.item.id}}",
+          "url_path": "/client/v4/zones/cf4d15af4a7eb86b033f859aefec1047/rulesets/47e1f8f7826b485498964c658c551f22/rules/{{loop-ruleset-rules.item.id}}",
+          "url_prefix": null,
+          "payload": "",
+          "parameters": [],
+          "retry_on_status_code": null,
+          "retry_on_status_codes": [
+            500
+          ],
+          "retry_config": null,
+          "ssl_verification": true,
+          "timeout": 30,
+          "headers": {
+            "Content-Type": "application/json"
+          },
+          "use_authentication_data": true,
+          "use_proxy": false,
+          "proxy_user": null,
+          "proxy_password": null,
+          "proxy_host": null,
+          "proxy_port": null,
+          "redirect_follow": true,
+          "continue_on_fail": true,
+          "continue_on_fail_status_codes": [],
+          "body_type": null
+        },
+        "state": "active",
+        "description": "Delete Ruleset Rule",
+        "client_data": {
+          "position": {
+            "x": 0.0,
+            "y": 0.0
+          },
+          "dimensions": {
+            "width": 256.0,
+            "height": 100.0
+          },
+          "collapsed": false
+        },
+        "snippet_workflow_id": null,
+        "snippet_version_id": null
+      },
+      "export_id": 9,
+      "connected_to": [],
+      "parent_action": 7
+    },
+    {
+      "action": {
+        "type": "http_request",
+        "tag": "integration",
+        "connection_id": "f1d111b8-d0c0-4ea7-8ae7-2891c16e9592",
+        "connection_name": "",
+        "use_connection_name": false,
+        "integration_id": "0dedd07c-0b9a-4205-9215-03ab1a95eb3a",
+        "data": {
+          "name": "List Gateway Rules",
+          "action_type": "http_request",
+          "public_action_id": null,
+          "method": "get",
+          "url": "{{Connection.protocol}}{{Connection.url}}/client/v4/accounts/b8e637d5097fff0c694c3290ba81563e/gateway/rules",
+          "url_path": "/client/v4/accounts/b8e637d5097fff0c694c3290ba81563e/gateway/rules",
+          "url_prefix": null,
+          "payload": "",
+          "parameters": [],
+          "retry_on_status_code": null,
+          "retry_on_status_codes": [
+            500
+          ],
+          "retry_config": null,
+          "ssl_verification": true,
+          "timeout": 30,
+          "headers": {
+            "Content-Type": "application/json"
+          },
+          "use_authentication_data": true,
+          "use_proxy": false,
+          "proxy_user": null,
+          "proxy_password": null,
+          "proxy_host": null,
+          "proxy_port": null,
+          "redirect_follow": true,
+          "continue_on_fail": true,
+          "continue_on_fail_status_codes": [],
+          "body_type": null
+        },
+        "state": "active",
+        "description": "List Gateway Rules",
+        "client_data": {
+          "position": {
+            "x": 0.0,
+            "y": 0.0
+          },
+          "dimensions": {
+            "width": 256.0,
+            "height": 100.0
+          },
+          "collapsed": false
+        },
+        "snippet_workflow_id": null,
+        "snippet_version_id": null
+      },
+      "export_id": 10,
+      "connected_to": [
+        {
+          "target": 11,
+          "custom_handle": null,
+          "payload": null
+        }
+      ],
+      "parent_action": null
+    },
+    {
+      "action": {
+        "type": "loop",
+        "tag": "core_action",
+        "connection_id": null,
+        "connection_name": null,
+        "use_connection_name": false,
+        "integration_id": null,
+        "data": {
+          "name": "Loop Gateway Rules",
+          "action_type": "loop",
+          "loop_type": "dynamic",
+          "number_of_iterations": 1,
+          "object_to_iterate": "{{list-gateway-rules.body.result}}",
+          "is_parallel": false
+        },
+        "state": "active",
+        "description": "Loop Gateway Rules",
+        "client_data": {
+          "position": {
+            "x": 0.0,
+            "y": 0.0
+          },
+          "dimensions": {
+            "width": 256.0,
+            "height": 100.0
+          },
+          "collapsed": false
+        },
+        "snippet_workflow_id": null,
+        "snippet_version_id": null
+      },
+      "export_id": 11,
+      "connected_to": [
+        {
+          "target": 12,
+          "custom_handle": "inner",
+          "payload": null
+        },
+        {
+          "target": 14,
+          "custom_handle": null,
+          "payload": null
+        }
+      ],
+      "parent_action": null
+    },
+    {
+      "action": {
+        "type": "condition",
+        "tag": "core_action",
+        "connection_id": null,
+        "connection_name": null,
+        "use_connection_name": false,
+        "integration_id": null,
+        "data": {
+          "name": "Is OneFlare Gateway Rule",
+          "action_type": "condition",
+          "condition_type": "simple",
+          "condition": {
+            "operator": "and",
+            "conditions": [
+              {
+                "operator": "and",
+                "conditions": [
+                  {
+                    "input_value": "{{loop-gateway-rules.item.name}}",
+                    "compared_value": "OneFlare",
+                    "comparison_operator": "contains"
+                  }
+                ]
+              }
+            ]
+          },
+          "conditions": null,
+          "conditions_relationship": "and"
+        },
+        "state": "active",
+        "description": "Is OneFlare Gateway Rule",
+        "client_data": {
+          "position": {
+            "x": 0.0,
+            "y": 0.0
+          },
+          "dimensions": {
+            "width": 256.0,
+            "height": 100.0
+          },
+          "collapsed": false
+        },
+        "snippet_workflow_id": null,
+        "snippet_version_id": null
+      },
+      "export_id": 12,
+      "connected_to": [
+        {
+          "target": 13,
+          "custom_handle": "true",
+          "payload": null
+        }
+      ],
+      "parent_action": 11
+    },
+    {
+      "action": {
+        "type": "http_request",
+        "tag": "integration",
+        "connection_id": "f1d111b8-d0c0-4ea7-8ae7-2891c16e9592",
+        "connection_name": "",
+        "use_connection_name": false,
+        "integration_id": "0dedd07c-0b9a-4205-9215-03ab1a95eb3a",
+        "data": {
+          "name": "Delete Gateway Rule",
+          "action_type": "http_request",
+          "public_action_id": null,
+          "method": "delete",
+          "url": "{{Connection.protocol}}{{Connection.url}}/client/v4/accounts/b8e637d5097fff0c694c3290ba81563e/gateway/rules/{{loop-gateway-rules.item.id}}",
+          "url_path": "/client/v4/accounts/b8e637d5097fff0c694c3290ba81563e/gateway/rules/{{loop-gateway-rules.item.id}}",
+          "url_prefix": null,
+          "payload": "",
+          "parameters": [],
+          "retry_on_status_code": null,
+          "retry_on_status_codes": [
+            500
+          ],
+          "retry_config": null,
+          "ssl_verification": true,
+          "timeout": 30,
+          "headers": {
+            "Content-Type": "application/json"
+          },
+          "use_authentication_data": true,
+          "use_proxy": false,
+          "proxy_user": null,
+          "proxy_password": null,
+          "proxy_host": null,
+          "proxy_port": null,
+          "redirect_follow": true,
+          "continue_on_fail": true,
+          "continue_on_fail_status_codes": [],
+          "body_type": null
+        },
+        "state": "active",
+        "description": "Delete Gateway Rule",
+        "client_data": {
+          "position": {
+            "x": 0.0,
+            "y": 0.0
+          },
+          "dimensions": {
+            "width": 256.0,
+            "height": 100.0
+          },
+          "collapsed": false
+        },
+        "snippet_workflow_id": null,
+        "snippet_version_id": null
+      },
+      "export_id": 13,
+      "connected_to": [],
+      "parent_action": 11
+    },
+    {
+      "action": {
+        "type": "http_request",
+        "tag": "integration",
+        "connection_id": "f1d111b8-d0c0-4ea7-8ae7-2891c16e9592",
+        "connection_name": "",
+        "use_connection_name": false,
+        "integration_id": "0dedd07c-0b9a-4205-9215-03ab1a95eb3a",
+        "data": {
+          "name": "List DNS Records",
+          "action_type": "http_request",
+          "public_action_id": null,
+          "method": "get",
+          "url": "{{Connection.protocol}}{{Connection.url}}/client/v4/zones/cf4d15af4a7eb86b033f859aefec1047/dns_records?name={{local_var.sink_name}}",
+          "url_path": "/client/v4/zones/cf4d15af4a7eb86b033f859aefec1047/dns_records?name={{local_var.sink_name}}",
+          "url_prefix": null,
+          "payload": "",
+          "parameters": [],
+          "retry_on_status_code": null,
+          "retry_on_status_codes": [
+            500
+          ],
+          "retry_config": null,
+          "ssl_verification": true,
+          "timeout": 30,
+          "headers": {
+            "Content-Type": "application/json"
+          },
+          "use_authentication_data": true,
+          "use_proxy": false,
+          "proxy_user": null,
+          "proxy_password": null,
+          "proxy_host": null,
+          "proxy_port": null,
+          "redirect_follow": true,
+          "continue_on_fail": true,
+          "continue_on_fail_status_codes": [],
+          "body_type": null
+        },
+        "state": "active",
+        "description": "List DNS Records",
+        "client_data": {
+          "position": {
+            "x": 0.0,
+            "y": 0.0
+          },
+          "dimensions": {
+            "width": 256.0,
+            "height": 100.0
+          },
+          "collapsed": false
+        },
+        "snippet_workflow_id": null,
+        "snippet_version_id": null
+      },
+      "export_id": 14,
+      "connected_to": [
+        {
+          "target": 15,
+          "custom_handle": null,
+          "payload": null
+        }
+      ],
+      "parent_action": null
+    },
+    {
+      "action": {
+        "type": "loop",
+        "tag": "core_action",
+        "connection_id": null,
+        "connection_name": null,
+        "use_connection_name": false,
+        "integration_id": null,
+        "data": {
+          "name": "Loop DNS Records",
+          "action_type": "loop",
+          "loop_type": "dynamic",
+          "number_of_iterations": 1,
+          "object_to_iterate": "{{list-dns-records.body.result}}",
+          "is_parallel": false
+        },
+        "state": "active",
+        "description": "Loop DNS Records",
+        "client_data": {
+          "position": {
+            "x": 0.0,
+            "y": 0.0
+          },
+          "dimensions": {
+            "width": 256.0,
+            "height": 100.0
+          },
+          "collapsed": false
+        },
+        "snippet_workflow_id": null,
+        "snippet_version_id": null
+      },
+      "export_id": 15,
+      "connected_to": [
+        {
+          "target": 16,
+          "custom_handle": "inner",
+          "payload": null
+        },
+        {
+          "target": 17,
+          "custom_handle": null,
+          "payload": null
+        }
+      ],
+      "parent_action": null
+    },
+    {
+      "action": {
+        "type": "http_request",
+        "tag": "integration",
+        "connection_id": "f1d111b8-d0c0-4ea7-8ae7-2891c16e9592",
+        "connection_name": "",
+        "use_connection_name": false,
+        "integration_id": "0dedd07c-0b9a-4205-9215-03ab1a95eb3a",
+        "data": {
+          "name": "Delete DNS Record",
+          "action_type": "http_request",
+          "public_action_id": null,
+          "method": "delete",
+          "url": "{{Connection.protocol}}{{Connection.url}}/client/v4/zones/cf4d15af4a7eb86b033f859aefec1047/dns_records/{{loop-dns-records.item.id}}",
+          "url_path": "/client/v4/zones/cf4d15af4a7eb86b033f859aefec1047/dns_records/{{loop-dns-records.item.id}}",
+          "url_prefix": null,
+          "payload": "",
+          "parameters": [],
+          "retry_on_status_code": null,
+          "retry_on_status_codes": [
+            500
+          ],
+          "retry_config": null,
+          "ssl_verification": true,
+          "timeout": 30,
+          "headers": {
+            "Content-Type": "application/json"
+          },
+          "use_authentication_data": true,
+          "use_proxy": false,
+          "proxy_user": null,
+          "proxy_password": null,
+          "proxy_host": null,
+          "proxy_port": null,
+          "redirect_follow": true,
+          "continue_on_fail": true,
+          "continue_on_fail_status_codes": [],
+          "body_type": null
+        },
+        "state": "active",
+        "description": "Delete DNS Record",
+        "client_data": {
+          "position": {
+            "x": 0.0,
+            "y": 0.0
+          },
+          "dimensions": {
+            "width": 256.0,
+            "height": 100.0
+          },
+          "collapsed": false
+        },
+        "snippet_workflow_id": null,
+        "snippet_version_id": null
+      },
+      "export_id": 16,
+      "connected_to": [],
+      "parent_action": 15
+    },
+    {
+      "action": {
+        "type": "http_request",
+        "tag": "integration",
+        "connection_id": "f1d111b8-d0c0-4ea7-8ae7-2891c16e9592",
+        "connection_name": "",
+        "use_connection_name": false,
+        "integration_id": "0dedd07c-0b9a-4205-9215-03ab1a95eb3a",
+        "data": {
+          "name": "Revert Zone Security Level",
+          "action_type": "http_request",
+          "public_action_id": null,
+          "method": "patch",
+          "url": "{{Connection.protocol}}{{Connection.url}}/client/v4/zones/cf4d15af4a7eb86b033f859aefec1047/settings/security_level",
+          "url_path": "/client/v4/zones/cf4d15af4a7eb86b033f859aefec1047/settings/security_level",
+          "url_prefix": null,
+          "payload": "{\"value\": \"medium\"}",
+          "parameters": [],
+          "retry_on_status_code": null,
+          "retry_on_status_codes": [
+            500
+          ],
+          "retry_config": null,
+          "ssl_verification": true,
+          "timeout": 30,
+          "headers": {
+            "Content-Type": "application/json"
+          },
+          "use_authentication_data": true,
+          "use_proxy": false,
+          "proxy_user": null,
+          "proxy_password": null,
+          "proxy_host": null,
+          "proxy_port": null,
+          "redirect_follow": true,
+          "continue_on_fail": true,
+          "continue_on_fail_status_codes": [],
+          "body_type": null
+        },
+        "state": "active",
+        "description": "Revert Zone Security Level",
+        "client_data": {
+          "position": {
+            "x": 0.0,
+            "y": 0.0
+          },
+          "dimensions": {
+            "width": 256.0,
+            "height": 100.0
+          },
+          "collapsed": false
+        },
+        "snippet_workflow_id": null,
+        "snippet_version_id": null
+      },
+      "export_id": 17,
+      "connected_to": [],
+      "parent_action": null
+    }
+  ],
+  "notes": []
+}
