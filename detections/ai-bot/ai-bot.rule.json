@@ -12,8 +12,8 @@
     "s1ql": "",
     "scheduledParams": {
       "query": "class_uid=4002 dataSource.cloudflare_dataset='HTTP Requests'\n| let src_ip = src_endpoint.ip\n| group\n    distinct_uas   = estimate_distinct(http_request.user_agent),\n    total_requests = count(),\n    distinct_paths = estimate_distinct(http_request.url.path),\n    sample_ua      = any(http_request.user_agent),\n    host           = any(http_request.url.hostname),\n    country        = any(src_endpoint.location.country),\n    first_seen     = oldest(timestamp),\n    last_seen      = newest(timestamp)\n  by src_ip\n| filter distinct_uas >= 5\n| let detection_time = simpledateformat(last_seen, 'yyyy-MM-dd HH:mm:ss z', 'America/Chicago')\n| sort -distinct_uas\n| columns detection_time, src_ip, host, distinct_uas, total_requests, distinct_paths, sample_ua, country, first_seen\n| limit 100",
-      "runIntervalMinutes": 1,
-      "lookbackWindowMinutes": 15,
+      "runIntervalMinutes": 5,
+      "lookbackWindowMinutes": 5,
       "threshold": {
         "value": 0,
         "operator": "Greater"
