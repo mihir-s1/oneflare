@@ -684,7 +684,7 @@
           "url": "https://slack.com/api/chat.update",
           "url_path": "/api/chat.postMessage",
           "url_prefix": null,
-          "payload": "{\n  \"channel\": \"{{local_var.channel_id}}\",\n  \"ts\": \"{{send-interactive-message.body.ts}}\",\n  \"text\": \"`{{local_var.src_ip}}` was blocked at the Cloudflare edge (IP Access Rule) by {{wait-for-slack.body.user.username}}.\\n\\n*Alert:* <{{Function.GET_MANAGEMENT_URL()}}/incidents/unified-alerts?alertId={{singularity-response-trigger.data.id}}|{{singularity-response-trigger.data.name}}>\"\n}",
+          "payload": "{\n  \"channel\": \"{{local_var.channel_id}}\",\n  \"ts\": \"{{send-interactive-message.body.ts}}\",\n  \"text\": \":white_check_mark: `{{local_var.src_ip}}` was blocked at the Cloudflare edge (IP Access Rule) by {{wait-for-slack.body.user.username}}.\\n\\n*Alert:* <{{Function.GET_MANAGEMENT_URL()}}/incidents/unified-alerts?alertId={{singularity-response-trigger.data.id}}|{{singularity-response-trigger.data.name}}>\"\n}",
           "parameters": [],
           "retry_on_status_code": null,
           "retry_on_status_codes": [
@@ -749,7 +749,7 @@
           "url": "https://slack.com/api/chat.update",
           "url_path": "/api/chat.postMessage",
           "url_prefix": null,
-          "payload": "{\n  \"channel\": \"{{local_var.channel_id}}\",\n  \"ts\": \"{{send-interactive-message.body.ts}}\",\n  \"text\": \"Dismissed as false positive (e.g. shared corporate egress / NAT). No block applied. Alert: <{{Function.GET_MANAGEMENT_URL()}}/incidents/unified-alerts?alertId={{singularity-response-trigger.data.id}}|{{singularity-response-trigger.data.name}}>\"\n}",
+          "payload": "{\n  \"channel\": \"{{local_var.channel_id}}\",\n  \"ts\": \"{{send-interactive-message.body.ts}}\",\n  \"text\": \":x: Dismissed as false positive (e.g. shared corporate egress / NAT). No block applied. Alert: <{{Function.GET_MANAGEMENT_URL()}}/incidents/unified-alerts?alertId={{singularity-response-trigger.data.id}}|{{singularity-response-trigger.data.name}}>\"\n}",
           "parameters": [],
           "retry_on_status_code": null,
           "retry_on_status_codes": [
