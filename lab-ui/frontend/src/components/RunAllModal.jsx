@@ -7,8 +7,8 @@ import { getMe, getTenants, getRunTarget } from '../lib/session.js'
 import { buildRunConfig, runScenarioWs, saveRunToHistory } from '../lib/runner.js'
 
 /**
- * "Run All Attacks" — fires every scenario available to the caller, one after
- * another, streaming into a single terminal. Admins still pick the console via
+ * "Run All Attacks" — fires every scenario available to the caller concurrently
+ * (all at once), streaming into a single terminal with per-scenario [id] prefixes. Admins still pick the console via
  * the shared TargetBar (including the "__all__" fan-out); non-admins are forced
  * to their own subdomain server-side, same as an individual scenario run.
  */
@@ -23,8 +23,12 @@ export default function RunAllModal({ scenarios, onClose }) {
   const [serverConfig, setServerConfig] = useState(null)
   const [ready, setReady] = useState(false)
 
-  const wsRef = useRef(null)
+  const socketsRef = useRef([])
   const cancelRef = useRef(false)
+
+  const closeAllSockets = () => {
+    socketsRef.current.forEach(ws => { try { ws?.close() } catch { /* noop */ } })
+  }
 
   useEffect(() => {
     let alive = true
@@ -40,7 +44,7 @@ export default function RunAllModal({ scenarios, onClose }) {
     return () => {
       alive = false
       cancelRef.current = true
-      wsRef.current?.close()
+      closeAllSockets()
     }
   }, [])
 
@@ -58,12 +62,13 @@ export default function RunAllModal({ scenarios, onClose }) {
   async function handleRunAll() {
     if (isRunning) {
       cancelRef.current = true
-      wsRef.current?.close()
+      closeAllSockets()
       setIsRunning(false)
       return
     }
 
     cancelRef.current = false
+    socketsRef.current = []
     setLines([])
     setDone(false)
     setNeedsLogin(false)
@@ -75,45 +80,50 @@ export default function RunAllModal({ scenarios, onClose }) {
     const fanOut = isAdmin && storedTarget === '__all__'
     const tenants = fanOut ? await getTenants() : []
 
-    const handlers = {
-      onLine: append,
-      onStart: (name) => append(`► ${name}`),
-      onError: (message) => {
-        append(`ERROR: ${message}`)
-        if (String(message || '').toLowerCase().includes('log in')) setNeedsLogin(true)
-      },
-      registerSocket: (ws) => { wsRef.current = ws },
-    }
+    append(`⚡ Launching all ${scenarios.length} attacks in parallel — output is interleaved and tagged [scenario].`)
+    append('')
 
-    let ran = 0
-    for (let i = 0; i < scenarios.length; i++) {
-      if (cancelRef.current) break
-      const sc = scenarios[i]
-      setProgress({ current: i + 1, total: scenarios.length })
-      append('')
-      append(`━━━━ [${i + 1}/${scenarios.length}] ${sc.title} ━━━━`)
-
-      if (fanOut) {
-        if (!tenants.length) {
-          append('No registered tenants found — nothing to fan out to.')
-        } else {
-          for (const t of tenants) {
-            if (cancelRef.current) break
-            append(`── [${t.subdomain}] ──`)
-            await runScenarioWs(sc.id, config, t.subdomain, handlers)
-          }
-        }
-      } else {
-        await runScenarioWs(sc.id, config, isAdmin ? storedTarget : '', handlers)
+    // Run every scenario concurrently. Each streams into the shared terminal with
+    // a [scenario-id] prefix so interleaved lines stay attributable. Progress
+    // counts completions as they land (order is non-deterministic in parallel).
+    let completed = 0
+    const runOne = async (sc) => {
+      const label = sc.id
+      const handlers = {
+        onLine: (line) => append(`[${label}] ${line}`),
+        onStart: (name) => append(`► [${label}] ${name}`),
+        onError: (message) => {
+          append(`[${label}] ERROR: ${message}`)
+          if (String(message || '').toLowerCase().includes('log in')) setNeedsLogin(true)
+        },
+        registerSocket: (ws) => { socketsRef.current.push(ws) },
       }
-      ran += 1
-      if (cancelRef.current) break
+      try {
+        if (fanOut) {
+          if (!tenants.length) {
+            append(`[${label}] No registered tenants found — nothing to fan out to.`)
+          } else {
+            for (const t of tenants) {
+              if (cancelRef.current) break
+              append(`[${label}] ── [${t.subdomain}] ──`)
+              await runScenarioWs(sc.id, config, t.subdomain, handlers)
+            }
+          }
+        } else {
+          await runScenarioWs(sc.id, config, isAdmin ? storedTarget : '', handlers)
+        }
+      } finally {
+        completed += 1
+        setProgress({ current: completed, total: scenarios.length })
+      }
     }
+
+    await Promise.all(scenarios.map(runOne))
 
     append('')
     append(cancelRef.current
-      ? `■ Stopped — ran ${ran}/${scenarios.length} scenario${scenarios.length === 1 ? '' : 's'}.`
-      : `✓ Done — ran all ${scenarios.length} scenario${scenarios.length === 1 ? '' : 's'}.`)
+      ? `■ Stopped — ${completed}/${scenarios.length} scenario${scenarios.length === 1 ? '' : 's'} finished.`
+      : `✓ Done — ran all ${scenarios.length} scenario${scenarios.length === 1 ? '' : 's'} in parallel.`)
 
     setIsRunning(false)
     setDone(true)
@@ -125,7 +135,7 @@ export default function RunAllModal({ scenarios, onClose }) {
 
   function handleClose() {
     cancelRef.current = true
-    wsRef.current?.close()
+    closeAllSockets()
     onClose()
   }
 
@@ -144,7 +154,7 @@ export default function RunAllModal({ scenarios, onClose }) {
             <div>
               <h2 className="text-lg font-bold text-slate-100 leading-tight">Run All Attacks</h2>
               <p className="text-sm text-slate-400 mt-0.5">
-                Fires every attack available to you ({scenarios.length}), one after another.
+                Fires every attack available to you ({scenarios.length}) at once, in parallel.
               </p>
             </div>
           </div>
@@ -159,7 +169,7 @@ export default function RunAllModal({ scenarios, onClose }) {
           <div className="rounded-xl border border-orange-500/30 bg-orange-500/5 p-4 flex gap-3">
             <AlertTriangle className="w-5 h-5 text-orange-400 shrink-0 mt-0.5" />
             <p className="text-xs text-slate-400 leading-relaxed">
-              This sends real attack traffic for every scenario to your configured lab endpoints, back to back.
+              This sends real attack traffic for every scenario to your configured lab endpoints, all at once.
               Only run against systems you own and have permission to test. All traffic is logged by Cloudflare.
             </p>
           </div>
